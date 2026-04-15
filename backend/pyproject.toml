@@ -1,0 +1,23 @@
+[project]
+name = "cusco"
+version = "0.1.0"
+description = "Entity intelligence for Portuguese companies — insolvency, tax debts, public contracts"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "httpx>=0.28",
+    "beautifulsoup4>=4.12",
+    "pymupdf>=1.25",
+    "pydantic>=2.10",
+]
+
+[project.optional-dependencies]
+dev = ["ruff", "pytest", "pytest-asyncio"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cusco"]

@@ -1,122 +1,131 @@
 # Cusco
 
-**Cusco** is an AI-powered agent for exploring Portuguese public procurement data. It lets you search for companies and public contracts, uncover relationships between entities and municipalities, and visualize them as an interactive bubble graph.
+**Cusco** is an entity intelligence platform for Portuguese companies. Given a NIF (tax identification number), it aggregates data from multiple official government sources — public contracts, insolvency proceedings, and tax debtor lists — into a single report.
 
 Built for [Agents Day Braga 2026](https://taikai.network/en/layerx/hackathons/agents-day-braga-2026/overview).
 
 ## Problem
 
-Public procurement data in Portugal (BASE/IMPIC) is open but hard to navigate. Understanding which companies win contracts in which municipalities, how much they're worth, and how concentrated the supplier landscape is requires manually cross-referencing multiple data sources. There's no easy way to ask natural language questions or see the big picture at a glance.
+Assessing the financial health and public procurement history of a Portuguese company requires manually cross-referencing multiple government portals: Portal BASE for contracts, CITIUS for insolvency proceedings, Portal das Financas for tax debts. Each has a different interface, none talk to each other, and there's no single place to get a consolidated view.
 
 ## Solution
 
-Cusco is a conversational agent that:
+Cusco is a web app that takes a company NIF and runs all these checks in parallel, returning a unified entity report with:
 
-- **Searches** companies by NIF or name and retrieves their public contract history
-- **Searches** public contracts by municipality, year, price range, procedure type, or free text
-- **Maps relationships** between contracting entities (municipalities/public bodies) and suppliers
-- **Visualizes** these relationships as an interactive bubble graph where nodes are entities and edges are contracts, sized by value
+- **NIF validation** — entity type (company/individual), validity
+- **Public contracts** — full procurement history as supplier or contracting entity (2024-2026, ~170K contracts)
+- **Insolvency proceedings** — active CIRE/PER/PEAP proceedings from CITIUS
+- **Tax debtor status** — whether the entity appears on the AT public debtor list, with debt bracket
 
-## Data Source — ptdata.org API
-
-All data comes from [api.ptdata.org](https://api.ptdata.org/), a unified Portuguese open data API. The API also exposes an MCP server at `https://api.ptdata.org/mcp` with 21 integrated tools.
-
-### Key Endpoints
-
-#### Contracts (`/v1/contracts`)
-
-List and filter public procurement contracts from BASE/IMPIC.
-
-| Parameter      | Type    | Description                        |
-| -------------- | ------- | ---------------------------------- |
-| `year`         | integer | Filter by contract year            |
-| `entity`       | string  | Contracting entity NIF             |
-| `supplier`     | string  | Supplier NIF                       |
-| `district`     | string  | District code                      |
-| `municipality` | string  | Municipality code                  |
-| `procedure`    | string  | Procedure type                     |
-| `cpv`          | string  | Common Procurement Vocabulary code |
-| `min_price`    | number  | Minimum contract price (EUR)       |
-| `max_price`    | number  | Maximum contract price (EUR)       |
-| `q`            | string  | Full-text search on contract object|
-| `limit`        | integer | Results per page (default: 50)     |
-| `offset`       | integer | Pagination offset (default: 0)     |
-
-**Response fields per contract:** `id`, `announcement_num`, `contract_type`, `procedure_type`, `object`, `description`, `contracting_entity`, `contracting_nif`, `suppliers[]`, `supplier_nifs[]`, `publication_date`, `signing_date`, `contract_price`, `base_price`, `actual_price`, `cpv_codes[]`, `execution_days`, `execution_location[]`, `district_code`, `municipality_code`, `year`, `close_date`.
-
-#### Single Contract (`/v1/contracts/{id}`)
-
-Get full details for a specific contract by its IMPIC ID.
-
-#### Contract Statistics (`/v1/contracts/stats`)
-
-Aggregated stats: `total_contracts`, `total_value_eur`, `avg_value_eur`, `contracts_this_year`, `value_this_year_eur`, `top_procedure_type`.
-
-#### Company Lookup (`/v1/companies/{nif}`)
-
-Aggregated company profile by NIF (9-digit tax number).
-
-**Response fields:** `nif`, `valid`, `type`, `type_code`, `name`, `address`, `vat_active`, `cae_codes[]` (with `code`, `description`, `type`), `public_contracts` (with `total`, `total_value`, `recent[]`), `sources[]`.
-
-#### NIF Validation (`/v1/fiscal/nif/{nif}`)
-
-Validate a NIF and get its type: `nif`, `valid`, `type`, `type_code`, `check_digit`.
-
-#### Geography (`/v1/geo/`)
-
-- `GET /v1/geo/districts` — list all districts
-- `GET /v1/geo/districts/{code}` — district detail (include municipalities)
-- `GET /v1/geo/municipalities` — list/search municipalities (filter by `district`, `nuts_iii`, `q`; sort by `name`, `population`, `area_km2`)
-- `GET /v1/geo/municipalities/{code}` — municipality detail (include parishes)
-- `GET /v1/geo/parishes` — list/search parishes
-- `GET /v1/geo/search?q=` — search across all geo levels
-
-### Response Metadata
-
-All responses include:
-```json
-{
-  "meta": {
-    "version": "...",
-    "source": "...",
-    "timestamp": "...",
-    "docs": "..."
-  }
-}
-```
-
-### MCP Server
-
-The API exposes an MCP (Model Context Protocol) server at `https://api.ptdata.org/mcp` with 21 tools, enabling direct integration with AI agents.
-
-## Visualization Concept
-
-The core visualization is a **bubble/network graph** showing:
-
-- **Nodes:** Companies (suppliers) and contracting entities (municipalities, public bodies)
-- **Edges:** Contracts linking a supplier to a contracting entity
-- **Node size:** Total contract value for that entity
-- **Edge thickness:** Value of contracts between two specific nodes
-- **Color coding:** By district/region, entity type, or procedure type
-- **Interactions:** Click a node to see details, filter by year/region/value, zoom into clusters
-
-This makes it easy to spot:
-- Which suppliers dominate a municipality's procurement
-- Whether a company works across many municipalities or concentrates in one
-- Unusually large contracts or suspiciously narrow supplier pools
-
-## Architecture (Planned)
+## Architecture
 
 ```
-User (chat interface)
+Frontend (React + Vite + Tailwind)
   │
   ▼
-AI Agent (Claude + MCP tools)
+FastAPI Backend (:8000)
   │
-  ├── ptdata.org MCP server (contracts, companies, geo)
+  ├── /api/search?nif=...     → EntityReport (all sources in parallel)
+  ├── /api/health             → status
   │
-  └── Graph builder (processes relationships)
-        │
-        ▼
-  Interactive bubble graph (frontend)
+  ├── sources/nif.py          → ptdata.org NIF validation
+  ├── sources/contracts.py    → dados.gov.pt IMPIC bulk data
+  ├── sources/citius.py       → CITIUS insolvency scraper
+  └── sources/devedores.py    → AT debtor list PDFs
+```
+
+Each data source is a separate module implementing a `DataSource` base class, making it straightforward to add new sources.
+
+## Data Sources
+
+### Active (this iteration)
+
+| Source | Data | Method |
+|--------|------|--------|
+| **ptdata.org** `/v1/fiscal/nif/{nif}` | NIF validation, entity type | REST API (JSON) |
+| **dados.gov.pt** IMPIC contracts dataset | Public contracts 2024-2026 with NIFs, prices, entities, procedure types | Bulk JSON download (ZIP), indexed in-memory by NIF |
+| **CITIUS** `citius.mj.pt` | Insolvency proceedings (PER, PEAP, CIRE) by NIF | HTML scraping (ASP.NET form POST) |
+| **Portal das Financas** debtor PDFs | Tax debtor lists for companies, 6 brackets from EUR 10K to >1M | PDF download + text extraction |
+
+### Planned (future iterations)
+
+| Source | Data | Access |
+|--------|------|--------|
+| **dados.gov.pt IMPIC entities** | All entities registered in Portal BASE (46.7MB JSON) | Bulk download |
+| **dre.tretas.org** | Full Diario da Republica database — insolvency notices in Serie 2 | SQLite/JSON dump |
+| **nif.pt API** | Company name, address, CAE codes, status | REST JSON (API key) |
+| **publicacoes.mj.pt** | Commercial registry publications (formations, dissolutions, board changes) | HTML scraping |
+| **Portal BASE API** `base.gov.pt/base2/rest/contratos/` | Direct contract search | REST JSON (IMPIC auth required) |
+| **eInforma API** | Comprehensive company data | REST JSON (paid) |
+
+## Tech Stack
+
+- **Backend:** Python 3.11+, FastAPI, httpx, BeautifulSoup4, PyMuPDF, Pydantic
+- **Frontend:** React 19, Vite, TypeScript, TailwindCSS v4
+- **Data:** In-memory NIF-indexed contract store from IMPIC bulk data, cached PDFs
+
+## Development
+
+### Prerequisites
+
+- Python 3.11+
+- Node.js 18+
+
+### Backend
+
+```bash
+cd backend
+pip install -e ".[dev]"
+uvicorn cusco.main:app --reload --port 8000
+```
+
+On first start, the backend downloads and indexes ~170K contracts from dados.gov.pt (takes 1-2 minutes). Data is cached in `/tmp/cusco_cache/`.
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite dev server proxies `/api/*` to the FastAPI backend on port 8000.
+
+### API
+
+```
+GET /api/search?nif={9-digit-NIF}  → EntityReport
+GET /api/health                     → { status: "ok" }
+```
+
+## Project Structure
+
+```
+cusco/
+├── backend/
+│   ├── pyproject.toml
+│   └── src/cusco/
+│       ├── main.py             # FastAPI app, endpoints, source orchestration
+│       ├── models.py           # Pydantic models (EntityReport, Contract, etc.)
+│       └── sources/
+│           ├── base.py         # Abstract DataSource base class
+│           ├── nif.py          # ptdata.org NIF validation
+│           ├── contracts.py    # IMPIC contract data (dados.gov.pt bulk)
+│           ├── citius.py       # CITIUS insolvency scraper
+│           └── devedores.py    # AT debtor list PDFs
+├── frontend/
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── src/
+│       ├── App.tsx             # Main app with search flow
+│       ├── api/client.ts       # Typed API client
+│       ├── types.ts            # TypeScript types matching backend models
+│       └── components/
+│           ├── SearchBar.tsx
+│           ├── EntityReport.tsx
+│           ├── ContractsList.tsx
+│           ├── InsolvencyBadge.tsx
+│           └── DebtorStatus.tsx
+├── CONTEXT.md
+└── relevant-datasets.csv       # Curated list of relevant dados.gov.pt datasets
 ```
