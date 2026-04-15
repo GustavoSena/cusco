@@ -246,11 +246,12 @@ export function EntityReport({ report }: Props) {
         totalValue={report.contracts_total_value}
       />
 
-      {/* Seg Social */}
+      {/* Seg Social — hidden until connected to entity-level intelligence
       <SegSocialSection
         procedures={report.seg_social_procedures ?? []}
         organisms={report.seg_social_organisms ?? []}
       />
+      */}
     </div>
   );
 }
