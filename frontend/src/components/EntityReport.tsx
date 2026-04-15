@@ -29,36 +29,36 @@ export function EntityReport({ report }: Props) {
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-lg border p-6">
-        <div className="flex items-start justify-between">
+      <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-bold">
+            <h2 className="text-2xl font-bold tracking-tight">
               NIF {report.nif}
               {report.company?.valid && (
-                <span className="ml-2 px-2 py-0.5 text-xs font-bold bg-blue-100 text-blue-700 rounded-full align-middle">
+                <span className="ml-2 px-2 py-0.5 text-xs font-bold bg-brand-100 text-brand-700 rounded-full align-middle">
                   VALID
                 </span>
               )}
             </h2>
             {report.company?.name && (
-              <p className="text-lg text-gray-600 mt-1">
+              <p className="text-lg text-stone-600 mt-1">
                 {report.company.name}
               </p>
             )}
             {report.company && (
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-stone-500 mt-1">
                 {entityTypeLabel(report.company.entity_type)}
               </p>
             )}
             {/* LEI inline if available */}
             {report.lei_record && (
-              <p className="text-xs text-gray-400 mt-1 font-mono">
+              <p className="text-xs text-stone-400 mt-1 font-mono">
                 LEI: {report.lei_record.lei}
               </p>
             )}
           </div>
           {hasWarnings && (
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               {report.has_insolvency && (
                 <span className="px-3 py-1 text-sm font-bold bg-red-600 text-white rounded-full">
                   Insolvency
@@ -79,7 +79,7 @@ export function EntityReport({ report }: Props) {
         </div>
 
         {/* Source statuses */}
-        <div className="mt-4 flex gap-2 flex-wrap">
+        <div className="mt-4 flex gap-1.5 flex-wrap" role="status" aria-label="Data source statuses">
           {report.source_statuses.map((s) => (
             <span
               key={s.source}
@@ -87,14 +87,14 @@ export function EntityReport({ report }: Props) {
                 s.status === "ok"
                   ? "bg-green-100 text-green-700"
                   : s.status === "pending"
-                    ? "bg-gray-100 text-gray-500"
+                    ? "bg-stone-100 text-stone-500"
                     : s.status === "timeout"
                       ? "bg-yellow-100 text-yellow-700"
                       : "bg-red-100 text-red-700"
               }`}
             >
               {s.status === "pending" && (
-                <span className="inline-block w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
+                <span className="inline-block w-2 h-2 rounded-full bg-stone-400 animate-pulse" />
               )}
               {s.source}: {s.status}
               {s.error && s.status !== "ok" ? ` (${s.error})` : ""}

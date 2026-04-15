@@ -7,7 +7,7 @@ interface Props {
 
 export function InsolvencyBadge({ proceedings, hasInsolvency }: Props) {
   return (
-    <div className="bg-white rounded-lg border p-6">
+    <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6">
       <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
         Insolvency Status
         {hasInsolvency ? (
@@ -27,9 +27,9 @@ export function InsolvencyBadge({ proceedings, hasInsolvency }: Props) {
             <div key={i} className="p-3 bg-red-50 border border-red-200 rounded">
               <div className="flex justify-between text-sm">
                 <span className="font-medium">{p.process_number}</span>
-                <span className="text-gray-500">{p.date}</span>
+                <span className="text-stone-500">{p.date}</span>
               </div>
-              {p.court && <p className="text-sm text-gray-600 mt-1">{p.court}</p>}
+              {p.court && <p className="text-sm text-stone-600 mt-1">{p.court}</p>}
               {p.description && <p className="text-sm mt-1">{p.description}</p>}
               {p.action_type && (
                 <span className="inline-block mt-1 px-2 py-0.5 text-xs bg-red-100 text-red-600 rounded">
@@ -40,7 +40,7 @@ export function InsolvencyBadge({ proceedings, hasInsolvency }: Props) {
           ))}
         </div>
       ) : (
-        <p className="text-gray-500 text-sm">
+        <p className="text-stone-500 text-sm">
           No insolvency proceedings found in CITIUS.
         </p>
       )}

@@ -56,20 +56,23 @@ export function ChatPanel({ report }: Props) {
 
   return (
     <div className="w-full max-w-4xl mx-auto">
-      <div className="bg-white rounded-lg border">
+      <div className="bg-white rounded-lg border border-stone-200">
         <button
           type="button"
           onClick={() => setIsExpanded(!isExpanded)}
-          className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 transition-colors"
+          aria-expanded={isExpanded}
+          aria-controls="chat-panel-content"
+          className="w-full flex items-center justify-between p-4 text-left hover:bg-stone-50 transition-colors"
         >
-          <span className="font-semibold text-gray-700">
+          <span className="font-semibold text-stone-700">
             Ask about this company
           </span>
           <svg
-            className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+            className={`w-5 h-5 text-stone-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
+            aria-hidden="true"
           >
             <path
               strokeLinecap="round"
@@ -81,10 +84,10 @@ export function ChatPanel({ report }: Props) {
         </button>
 
         {isExpanded && (
-          <div className="border-t">
-            <div className="h-80 overflow-y-auto p-4 space-y-3">
+          <div id="chat-panel-content" className="border-t">
+            <div className="h-64 sm:h-80 overflow-y-auto p-3 sm:p-4 space-y-3">
               {messages.length === 0 && (
-                <p className="text-sm text-gray-400 text-center mt-8">
+                <p className="text-sm text-stone-400 text-center mt-8">
                   Ask a question about {report.company?.name || `NIF ${report.nif}`}
                 </p>
               )}
@@ -96,15 +99,15 @@ export function ChatPanel({ report }: Props) {
                   <div
                     className={`max-w-[80%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
                       msg.role === "user"
-                        ? "bg-blue-600 text-white"
-                        : "bg-gray-100 text-gray-800"
+                        ? "bg-brand-600 text-white"
+                        : "bg-stone-100 text-stone-800"
                     }`}
                   >
                     {msg.content}
                     {msg.role === "assistant" &&
                       msg.content === "" &&
                       isStreaming && (
-                        <span className="inline-block w-2 h-4 bg-gray-400 animate-pulse" />
+                        <span className="inline-block w-2 h-4 bg-stone-400 animate-pulse" />
                       )}
                   </div>
                 </div>
@@ -127,13 +130,14 @@ export function ChatPanel({ report }: Props) {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Ask a question..."
+                aria-label="Ask a question about this company"
                 disabled={isStreaming}
-                className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
+                className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:bg-stone-100"
               />
               <button
                 type="submit"
                 disabled={isStreaming || !input.trim()}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:bg-stone-300 disabled:cursor-not-allowed transition-colors"
               >
                 {isStreaming ? "..." : "Send"}
               </button>

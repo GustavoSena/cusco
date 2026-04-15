@@ -1,1 +1,21 @@
 @import "tailwindcss";
+
+@theme {
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+
+  --color-brand-50: oklch(0.97 0.015 185);
+  --color-brand-100: oklch(0.93 0.03 185);
+  --color-brand-200: oklch(0.87 0.05 185);
+  --color-brand-400: oklch(0.65 0.10 185);
+  --color-brand-500: oklch(0.52 0.11 185);
+  --color-brand-600: oklch(0.45 0.10 185);
+  --color-brand-700: oklch(0.38 0.09 185);
+  --color-brand-800: oklch(0.30 0.07 185);
+  --color-brand-900: oklch(0.22 0.05 185);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  letter-spacing: -0.025em;
+}

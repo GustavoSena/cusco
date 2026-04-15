@@ -98,18 +98,21 @@ export function CompanyProfile({ report }: Props) {
     company?.name || profile?.name || lei?.legal_name || null;
 
   return (
-    <div className="bg-white rounded-lg border p-6">
+    <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6">
       <button
         type="button"
         onClick={() => setShowDetails(!showDetails)}
+        aria-expanded={showDetails}
+        aria-controls="company-profile-content"
         className="w-full flex items-center justify-between text-left"
       >
         <h3 className="text-lg font-semibold">Company Profile</h3>
         <svg
-          className={`w-5 h-5 text-gray-400 transition-transform ${showDetails ? "rotate-180" : ""}`}
+          className={`w-5 h-5 text-stone-400 transition-transform ${showDetails ? "rotate-180" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
+          aria-hidden="true"
         >
           <path
             strokeLinecap="round"
@@ -121,7 +124,7 @@ export function CompanyProfile({ report }: Props) {
       </button>
 
       {showDetails && (
-        <div className="mt-4 space-y-4">
+        <div id="company-profile-content" className="mt-4 space-y-4">
           {/* Iberinform fields — richest source, show first when available */}
           {hasIberinform && (
             <>
@@ -130,21 +133,21 @@ export function CompanyProfile({ report }: Props) {
                   <tbody>
                     {iberinform!.fields.map((f, i) => (
                       <tr key={i} className="border-b last:border-0">
-                        <td className="px-4 py-2 text-gray-500 font-medium w-1/3 align-top whitespace-nowrap">
+                        <td className="px-2 sm:px-4 py-2 text-stone-500 font-medium sm:w-1/3 align-top sm:whitespace-nowrap">
                           {f.label}
                         </td>
-                        <td className="px-4 py-2 text-gray-800">{f.value}</td>
+                        <td className="px-2 sm:px-4 py-2 text-stone-800 break-words">{f.value}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               )}
               {iberinform!.summary && (
-                <div className="p-3 bg-gray-50 rounded">
-                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                <div className="p-3 bg-stone-50 rounded">
+                  <p className="text-xs text-stone-500 uppercase tracking-wide mb-1">
                     Summary
                   </p>
-                  <p className="text-sm text-gray-600 leading-relaxed">
+                  <p className="text-sm text-stone-600 leading-relaxed">
                     {iberinform!.summary}
                   </p>
                 </div>
@@ -157,20 +160,20 @@ export function CompanyProfile({ report }: Props) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {companyName && (
                 <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wide">
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">
                     Name
                   </p>
-                  <p className="text-sm font-medium text-gray-900 mt-1">
+                  <p className="text-sm font-medium text-stone-900 mt-1">
                     {companyName}
                   </p>
                 </div>
               )}
               {lei && (
                 <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wide">
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">
                     LEI
                   </p>
-                  <p className="text-sm font-mono text-gray-700 mt-1">
+                  <p className="text-sm font-mono text-stone-700 mt-1">
                     {lei.lei}
                   </p>
                   {lei.entity_status && (
@@ -188,10 +191,10 @@ export function CompanyProfile({ report }: Props) {
               )}
               {lei?.legal_address && (
                 <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wide">
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">
                     Registered Address
                   </p>
-                  <p className="text-sm text-gray-700 mt-1">
+                  <p className="text-sm text-stone-700 mt-1">
                     {[lei.legal_address, lei.legal_city, lei.legal_postal_code]
                       .filter(Boolean)
                       .join(", ")}
@@ -201,10 +204,10 @@ export function CompanyProfile({ report }: Props) {
               {lei?.headquarters_address &&
                 lei.headquarters_address !== lei.legal_address && (
                   <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide">
+                    <p className="text-xs text-stone-500 uppercase tracking-wide">
                       Headquarters
                     </p>
-                    <p className="text-sm text-gray-700 mt-1">
+                    <p className="text-sm text-stone-700 mt-1">
                       {[lei.headquarters_address, lei.headquarters_city]
                         .filter(Boolean)
                         .join(", ")}
@@ -213,13 +216,13 @@ export function CompanyProfile({ report }: Props) {
                 )}
               {(profile?.country || lei?.jurisdiction) && (
                 <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wide">
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">
                     Jurisdiction
                   </p>
-                  <p className="text-sm text-gray-700 mt-1">
+                  <p className="text-sm text-stone-700 mt-1">
                     {profile?.country || lei?.jurisdiction || "-"}
                     {profile?.country_code && (
-                      <span className="ml-1 text-gray-400">
+                      <span className="ml-1 text-stone-400">
                         ({profile.country_code})
                       </span>
                     )}
@@ -228,10 +231,10 @@ export function CompanyProfile({ report }: Props) {
               )}
               {lei?.initial_registration_date && (
                 <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wide">
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">
                     First Registered
                   </p>
-                  <p className="text-sm text-gray-700 mt-1">
+                  <p className="text-sm text-stone-700 mt-1">
                     {lei.initial_registration_date}
                   </p>
                 </div>
@@ -243,10 +246,10 @@ export function CompanyProfile({ report }: Props) {
           {hasIberinform && lei && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wide">
+                <p className="text-xs text-stone-500 uppercase tracking-wide">
                   LEI
                 </p>
-                <p className="text-sm font-mono text-gray-700 mt-1">
+                <p className="text-sm font-mono text-stone-700 mt-1">
                   {lei.lei}
                   {lei.entity_status && (
                     <span
@@ -263,10 +266,10 @@ export function CompanyProfile({ report }: Props) {
               </div>
               {lei.legal_address && (
                 <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wide">
+                  <p className="text-xs text-stone-500 uppercase tracking-wide">
                     Registered Address (GLEIF)
                   </p>
-                  <p className="text-sm text-gray-700 mt-1">
+                  <p className="text-sm text-stone-700 mt-1">
                     {[lei.legal_address, lei.legal_city, lei.legal_postal_code]
                       .filter(Boolean)
                       .join(", ")}
@@ -279,41 +282,41 @@ export function CompanyProfile({ report }: Props) {
           {/* IMPIC contract stats */}
           {profile && profile.total_contracts != null && (
             <>
-              <hr className="border-gray-100" />
+              <hr className="border-stone-100" />
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wide mb-3">
+                <p className="text-xs text-stone-500 uppercase tracking-wide mb-3">
                   Public Procurement Summary (IMPIC)
                 </p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
-                    <p className="text-xl font-bold text-gray-900">
+                    <p className="text-xl font-bold text-stone-900">
                       {profile.total_contracts ?? "-"}
                     </p>
-                    <p className="text-xs text-gray-500">Total Contracts</p>
+                    <p className="text-xs text-stone-500">Total Contracts</p>
                   </div>
                   <div>
-                    <p className="text-lg font-semibold text-gray-800">
+                    <p className="text-lg font-semibold text-stone-800">
                       {profile.times_as_supplier ?? "-"}
                     </p>
-                    <p className="text-xs text-gray-500">As Supplier</p>
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-stone-500">As Supplier</p>
+                    <p className="text-xs text-stone-400">
                       {formatEUR(profile.total_value_as_supplier)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-lg font-semibold text-gray-800">
+                    <p className="text-lg font-semibold text-stone-800">
                       {profile.times_as_entity ?? "-"}
                     </p>
-                    <p className="text-xs text-gray-500">As Entity</p>
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-stone-500">As Entity</p>
+                    <p className="text-xs text-stone-400">
                       {formatEUR(profile.total_value_as_entity)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-lg font-semibold text-gray-800">
+                    <p className="text-lg font-semibold text-stone-800">
                       {profile.country_code ?? "-"}
                     </p>
-                    <p className="text-xs text-gray-500">Country</p>
+                    <p className="text-xs text-stone-500">Country</p>
                   </div>
                 </div>
               </div>
@@ -323,12 +326,12 @@ export function CompanyProfile({ report }: Props) {
           {/* Other names from LEI */}
           {lei && lei.other_names.length > 0 && (
             <>
-              <hr className="border-gray-100" />
+              <hr className="border-stone-100" />
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                <p className="text-xs text-stone-500 uppercase tracking-wide mb-1">
                   Other Known Names
                 </p>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-stone-600">
                   {lei.other_names.join(", ")}
                 </p>
               </div>

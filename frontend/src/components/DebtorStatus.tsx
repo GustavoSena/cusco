@@ -7,7 +7,7 @@ interface Props {
 
 export function DebtorStatus({ debtor, isTaxDebtor }: Props) {
   return (
-    <div className="bg-white rounded-lg border p-6">
+    <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6">
       <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
         Tax Debtor Status
         {isTaxDebtor ? (
@@ -23,7 +23,7 @@ export function DebtorStatus({ debtor, isTaxDebtor }: Props) {
 
       {debtor?.found ? (
         <div className="p-4 bg-red-50 border border-red-200 rounded">
-          <p className="text-sm text-gray-700">
+          <p className="text-sm text-stone-700">
             Listed on the AT (Tax Authority) public debtor list.
           </p>
           {debtor.debt_bracket_label && (
@@ -33,7 +33,7 @@ export function DebtorStatus({ debtor, isTaxDebtor }: Props) {
           )}
         </div>
       ) : (
-        <p className="text-gray-500 text-sm">
+        <p className="text-stone-500 text-sm">
           Not found on the AT public debtor list.
         </p>
       )}

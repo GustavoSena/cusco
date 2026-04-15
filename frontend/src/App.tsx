@@ -2,6 +2,7 @@ import { useState } from "react";
 import { SearchBar } from "./components/SearchBar";
 import { EntityReport } from "./components/EntityReport";
 import { ChatPanel } from "./components/ChatPanel";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { searchByNifStream, searchByName } from "./api/client";
 import type {
   EntityReport as EntityReportType,
@@ -50,17 +51,18 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b">
-        <div className="max-w-5xl mx-auto px-4 py-6">
-          <h1 className="text-3xl font-bold text-gray-900">Cusco</h1>
-          <p className="text-gray-500 mt-1">
+    <ErrorBoundary>
+      <div className="min-h-screen bg-stone-50">
+      <header className="border-b border-stone-200">
+        <div className="max-w-5xl mx-auto px-4 py-4 sm:py-5 flex items-baseline gap-3 sm:gap-4">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-stone-900">Cusco</h1>
+          <p className="text-xs sm:text-sm text-stone-400 hidden sm:block">
             Entity intelligence for Portuguese companies
           </p>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
+      <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-6 sm:space-y-8">
         <SearchBar
           onSearchNif={handleSearchNif}
           onSearchName={handleSearchName}
@@ -70,8 +72,20 @@ export default function App() {
         />
 
         {error && (
-          <div className="max-w-2xl mx-auto p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-            {error}
+          <div
+            role="alert"
+            className="max-w-2xl mx-auto p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-start justify-between gap-3"
+          >
+            <p>{error}</p>
+            <button
+              onClick={() => setError(null)}
+              aria-label="Dismiss error"
+              className="shrink-0 text-red-400 hover:text-red-600 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         )}
 
@@ -88,15 +102,20 @@ export default function App() {
         )}
 
         {!report && !loading && !error && nameResults.length === 0 && (
-          <div className="text-center text-gray-400 mt-16">
-            <p className="text-lg">Search by NIF or company name</p>
-            <p className="text-sm mt-2">
-              Aggregates data from CITIUS, Portal das Finanças, IMPIC, GLEIF,
-              and more
+          <div className="text-center mt-24">
+            <p className="text-lg text-stone-500">
+              Search by NIF or company name
+            </p>
+            <p className="text-sm text-stone-400 mt-3">
+              Aggregates data from CITIUS, Portal das Finanças, IMPIC, GLEIF, Seg. Social, and AdC
+            </p>
+            <p className="text-xs text-stone-300 mt-8">
+              e.g. 500697256 (EDP) or 507280832 (Galp)
             </p>
           </div>
         )}
       </main>
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 }

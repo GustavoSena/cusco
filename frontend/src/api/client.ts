@@ -39,7 +39,11 @@ export async function searchByNifStream(
       if (!line.startsWith("data: ")) continue;
       const data = line.slice(6);
       if (data === "[DONE]") return;
-      onUpdate(JSON.parse(data));
+      try {
+        onUpdate(JSON.parse(data));
+      } catch {
+        // Skip malformed SSE events
+      }
     }
   }
 }
@@ -93,7 +97,11 @@ export async function sendChatMessage(
       if (!line.startsWith("data: ")) continue;
       const data = line.slice(6);
       if (data === "[DONE]") return;
-      onChunk(data);
+      try {
+        onChunk(data);
+      } catch {
+        // Skip malformed SSE events
+      }
     }
   }
 }
