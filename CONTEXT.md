@@ -25,20 +25,24 @@ Frontend (React + Vite + Tailwind)
   ▼
 FastAPI Backend (:8000)
   │
-  ├── /api/search?nif=...     → EntityReport (all sources in parallel)
+  ├── /api/search?nif=...     → EntityReport (7 sources in parallel)
+  ├── /api/search?name=...    → NameSearchResult (IMPIC entities + GLEIF)
   ├── /api/health             → status
   │
   ├── sources/nif.py          → ptdata.org NIF validation
-  ├── sources/contracts.py    → dados.gov.pt IMPIC bulk data
+  ├── sources/contracts.py    → dados.gov.pt IMPIC bulk contract data
   ├── sources/citius.py       → CITIUS insolvency scraper
-  └── sources/devedores.py    → AT debtor list PDFs
+  ├── sources/devedores.py    → AT debtor list PDFs
+  ├── sources/entities.py     → IMPIC entity registry (110K+ entities)
+  ├── sources/gleif.py        → GLEIF LEI records (company identity)
+  └── sources/seg_social.py   → Segurança Social public procedures
 ```
 
 Each data source is a separate module implementing a `DataSource` base class, making it straightforward to add new sources.
 
 ## Data Sources
 
-### Active (this iteration)
+### Active
 
 | Source | Data | Method |
 |--------|------|--------|
@@ -46,23 +50,34 @@ Each data source is a separate module implementing a `DataSource` base class, ma
 | **dados.gov.pt** IMPIC contracts dataset | Public contracts 2024-2026 with NIFs, prices, entities, procedure types | Bulk JSON download (ZIP), indexed in-memory by NIF |
 | **CITIUS** `citius.mj.pt` | Insolvency proceedings (PER, PEAP, CIRE) by NIF | HTML scraping (ASP.NET form POST) |
 | **Portal das Financas** debtor PDFs | Tax debtor lists for companies, 6 brackets from EUR 10K to >1M | PDF download + text extraction |
+| **dados.gov.pt** IMPIC entities | 110K+ entities registered in Portal BASE — names, countries, contract stats | Bulk JSON download (~47MB), indexed in-memory by NIF and name |
+| **GLEIF** `api.gleif.org` | LEI records — legal name, registered address, headquarters, entity status, jurisdiction, legal form | REST API (JSON, free, no auth) |
+| **Segurança Social** `seg-social.pt` | Public recruitment/mobility procedures with organism metadata | REST JSON API |
 
 ### Planned (future iterations)
 
-| Source | Data | Access |
-|--------|------|--------|
-| **dados.gov.pt IMPIC entities** | All entities registered in Portal BASE (46.7MB JSON) | Bulk download |
-| **dre.tretas.org** | Full Diario da Republica database — insolvency notices in Serie 2 | SQLite/JSON dump |
-| **nif.pt API** | Company name, address, CAE codes, status | REST JSON (API key) |
-| **publicacoes.mj.pt** | Commercial registry publications (formations, dissolutions, board changes) | HTML scraping |
-| **Portal BASE API** `base.gov.pt/base2/rest/contratos/` | Direct contract search | REST JSON (IMPIC auth required) |
-| **eInforma API** | Comprehensive company data | REST JSON (paid) |
+| Source | Data | Access | Notes |
+|--------|------|--------|-------|
+| **nif.pt API** | Company name, address, CAE codes, status | REST JSON (API key) | Requires paid API key |
+| **publicacoes.mj.pt** | Commercial registry publications (formations, dissolutions, board changes) | HTML scraping | Blocked by reCAPTCHA — needs solver |
+| **Portal BASE API** `base.gov.pt/base2/rest/contratos/` | Direct contract search | REST JSON (IMPIC auth required) | Requires auth |
+| **eInforma API** | Comprehensive company data | REST JSON (paid) | Paid service |
+| **PRR Entidades** (dados.gov.pt) | Entities receiving EU Recovery & Resilience Plan funding | XLSX bulk download | ~41MB, updated weekly |
+| **PT2030 Entidades** (dados.gov.pt) | Entities in Portugal 2030 EU structural funds | XLSX bulk download | ~2MB, updated monthly |
+
+### Investigated but not viable
+
+| Source | Reason |
+|--------|--------|
+| **dre.tretas.org** | Returns 403 to all automated requests; SQLite dump is 1.4GB — impractical for app startup |
+| **diariodarepublica.pt** | Pure JS SPA (OutSystems) with no REST API |
+| **publicacoes.mj.pt** | Google reCAPTCHA v2 blocks all programmatic access |
 
 ## Tech Stack
 
 - **Backend:** Python 3.11+, FastAPI, httpx, BeautifulSoup4, PyMuPDF, Pydantic
 - **Frontend:** React 19, Vite, TypeScript, TailwindCSS v4
-- **Data:** In-memory NIF-indexed contract store from IMPIC bulk data, cached PDFs
+- **Data:** In-memory NIF-indexed stores for contracts (~480K entries) and entities (~110K), cached PDFs
 
 ## Development
 
@@ -79,7 +94,7 @@ pip install -e ".[dev]"
 uvicorn cusco.main:app --reload --port 8000
 ```
 
-On first start, the backend downloads and indexes ~170K contracts from dados.gov.pt (takes 1-2 minutes). Data is cached in `/tmp/cusco_cache/`.
+On first start, the backend downloads and indexes ~480K contract entries and ~110K entities from dados.gov.pt (takes 1-2 minutes). Data is cached in `/tmp/cusco_cache/`.
 
 ### Frontend
 
@@ -94,8 +109,9 @@ The Vite dev server proxies `/api/*` to the FastAPI backend on port 8000.
 ### API
 
 ```
-GET /api/search?nif={9-digit-NIF}  → EntityReport
-GET /api/health                     → { status: "ok" }
+GET /api/search?nif={9-digit-NIF}    → EntityReport  (7 sources in parallel)
+GET /api/search?name={company-name}  → NameSearchResult  (IMPIC entities + GLEIF)
+GET /api/health                      → { status: "ok" }
 ```
 
 ## Project Structure
@@ -112,7 +128,10 @@ cusco/
 │           ├── nif.py          # ptdata.org NIF validation
 │           ├── contracts.py    # IMPIC contract data (dados.gov.pt bulk)
 │           ├── citius.py       # CITIUS insolvency scraper
-│           └── devedores.py    # AT debtor list PDFs
+│           ├── devedores.py    # AT debtor list PDFs
+│           ├── entities.py     # IMPIC entity registry (dados.gov.pt bulk)
+│           ├── gleif.py        # GLEIF LEI records (company identity)
+│           └── seg_social.py   # Segurança Social public procedures
 ├── frontend/
 │   ├── package.json
 │   ├── vite.config.ts
