@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { SearchBar } from "./components/SearchBar";
 import { EntityReport } from "./components/EntityReport";
+import { ChatPanel } from "./components/ChatPanel";
 import { searchByNif } from "./api/client";
 import type { EntityReport as EntityReportType } from "./types";
 
@@ -43,7 +44,15 @@ export default function App() {
           </div>
         )}
 
-        {report && <EntityReport report={report} />}
+        {report && (
+          <>
+            <EntityReport report={report} />
+            <ChatPanel
+              key={report.nif + report.queried_at}
+              report={report}
+            />
+          </>
+        )}
 
         {!report && !loading && !error && (
           <div className="text-center text-gray-400 mt-16">

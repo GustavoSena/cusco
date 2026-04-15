@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -163,5 +164,17 @@ class EntityReport(BaseModel):
     lei_record: LEIRecord | None = None
     seg_social_procedures: list[SegSocialProcedure] = Field(default_factory=list)
     seg_social_organisms: list[SegSocialOrganism] = Field(default_factory=list)
+    iberinform_content: str | None = None
     source_statuses: list[SourceResult] = Field(default_factory=list)
     queried_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[ChatMessage] = Field(default_factory=list)
+    report: EntityReport

@@ -10,6 +10,7 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "pymupdf>=1.25",
     "pydantic>=2.10",
+    "openai>=1.30",
 ]
 
 [project.optional-dependencies]
