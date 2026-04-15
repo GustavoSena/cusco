@@ -1,9 +1,18 @@
-import type { ChatMessage, EntityReport } from "../types";
+import type { ChatMessage, EntityReport, NameSearchResult } from "../types";
 
 const BASE = "/api";
 
 export async function searchByNif(nif: string): Promise<EntityReport> {
   const res = await fetch(`${BASE}/search?nif=${encodeURIComponent(nif)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function searchByName(name: string): Promise<NameSearchResult> {
+  const res = await fetch(`${BASE}/search?name=${encodeURIComponent(name)}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || `Error ${res.status}`);
