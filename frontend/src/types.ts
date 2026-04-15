@@ -95,6 +95,24 @@ export interface SegSocialOrganism {
   procedure_count: number;
 }
 
+export interface AdCProcess {
+  process_number: string;
+  process_type: string;
+  entities: string[];
+  sector: string;
+  practice_type: string;
+  year_opened: string;
+  year_decided: string;
+  final_decision: string;
+  status: string;
+  title: string;
+  court: string;
+  court_process_number: string;
+  origin_process: string;
+  detail_url: string;
+  pdf_url: string;
+}
+
 export interface SourceResult {
   source: string;
   status: "ok" | "error" | "timeout" | "not_found";
@@ -119,6 +137,8 @@ export interface EntityReport {
   lei_record: LEIRecord | null;
   seg_social_procedures: SegSocialProcedure[];
   seg_social_organisms: SegSocialOrganism[];
+  adc_processes: AdCProcess[];
+  has_competition_issues: boolean;
   iberinform_content: string | null;
   source_statuses: SourceResult[];
   queried_at: string;
