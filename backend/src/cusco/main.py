@@ -20,7 +20,7 @@ from .sources import (
 )
 from .chat import stream_chat
 from .models import ChatRequest, EntityReport, SourceResult, SourceStatus
-from .sources import NifSource, CitiusSource, DevedoresSource, ContractsSource,  EntitiesSource,IberinformSource, GleifSource, SegSocialSource
+from .sources import NifSource, CitiusSource, DevedoresSource, ContractsSource, EntitiesSource, IberinformSource, GleifSource, SegSocialSource, AdCSource
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ entities_source = EntitiesSource(timeout=120)
 gleif_source = GleifSource(timeout=15)
 seg_social_source = SegSocialSource(timeout=20)
 iberinform_source = IberinformSource(timeout=60)
+adc_source = AdCSource(timeout=60)
 
 
 @asynccontextmanager
@@ -42,6 +43,7 @@ async def lifespan(app: FastAPI):
     # Load contracts in background so the server starts immediately
     asyncio.create_task(_bg_load_contracts())
     asyncio.create_task(_bg_load_entities())
+    asyncio.create_task(_bg_load_adc())
     yield
     logger.info("Cusco shutting down.")
 
@@ -60,6 +62,14 @@ async def _bg_load_entities():
         logger.info("IMPIC entity data loaded in background.")
     except Exception as e:
         logger.warning(f"Background entity load failed (will retry on query): {e}")
+
+
+async def _bg_load_adc():
+    try:
+        await adc_source._ensure_loaded()
+        logger.info("AdC processes loaded in background.")
+    except Exception as e:
+        logger.warning(f"Background AdC load failed (will retry on query): {e}")
 
 
 app = FastAPI(
@@ -160,6 +170,48 @@ async def search_entity(
             report.seg_social_organisms = data["seg_social_organisms"]
         if "iberinform_content" in data:
             report.iberinform_content = data["iberinform_content"]
+        if "adc_processes" in data:
+            report.adc_processes = data["adc_processes"]
+            report.has_competition_issues = data.get("has_competition_issues", False)
+
+    # AdC cross-reference: search by company name if we have one
+    company_name = None
+    if report.company and report.company.name:
+        company_name = report.company.name
+    elif report.entity_profile and report.entity_profile.name:
+        company_name = report.entity_profile.name
+    elif report.lei_record and report.lei_record.legal_name:
+        company_name = report.lei_record.legal_name
+
+    if company_name and not report.adc_processes:
+        try:
+            # Try full name first, then significant tokens
+            search_names = [company_name]
+            # Extract the main brand/name (first word(s) before comma, dash, etc.)
+            import re as _re
+
+            core = _re.split(r"[,\-–—]", company_name)[0].strip()
+            # Remove common suffixes
+            core = _re.sub(
+                r"\s*(?:S\.?A\.?|LDA\.?|SGPS|Unipessoal|Comercial|"
+                r"Portugal|Portuguesa)\s*$",
+                "",
+                core,
+                flags=_re.IGNORECASE,
+            ).strip()
+            if core and core.lower() != company_name.lower() and len(core) >= 3:
+                search_names.append(core)
+
+            for search_name in search_names:
+                adc_results = await adc_source.search_by_name(search_name)
+                if adc_results.get("adc_processes"):
+                    report.adc_processes = adc_results["adc_processes"]
+                    report.has_competition_issues = adc_results.get(
+                        "has_competition_issues", False
+                    )
+                    break
+        except Exception as e:
+            logger.warning(f"AdC name cross-reference failed: {e}")
 
     return report
 

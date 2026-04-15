@@ -6,6 +6,7 @@ from .entities import EntitiesSource
 from .gleif import GleifSource
 from .seg_social import SegSocialSource
 from .iberinform import IberinformSource
+from .adc import AdCSource
 
 __all__ = [
     "NifSource",
@@ -16,4 +17,5 @@ __all__ = [
     "GleifSource",
     "SegSocialSource",
     "IberinformSource",
+    "AdCSource",
 ]
