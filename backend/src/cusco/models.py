@@ -136,6 +136,26 @@ class SegSocialOrganism(BaseModel):
     procedure_count: int = 0
 
 
+class AdCProcess(BaseModel):
+    """Competition authority (AdC) process record."""
+
+    process_number: str = ""
+    process_type: str = ""  # praticas_anticoncorrenciais, concentracoes, contencioso, estudos_pareceres
+    entities: list[str] = Field(default_factory=list)
+    sector: str = ""
+    practice_type: str = ""  # Abuso de Posição Dominante, Acordo Horizontal, etc.
+    year_opened: str = ""
+    year_decided: str = ""
+    final_decision: str = ""  # Condenatória, Arquivamento, etc.
+    status: str = ""  # Fechado, A decorrer, etc.
+    title: str = ""  # For estudos/pareceres
+    court: str = ""  # For contencioso
+    court_process_number: str = ""  # For contencioso
+    origin_process: str = ""  # For contencioso — links to PRC/CCENT
+    detail_url: str = ""
+    pdf_url: str = ""
+
+
 class SourceStatus(str, Enum):
     OK = "ok"
     ERROR = "error"
@@ -165,6 +185,8 @@ class EntityReport(BaseModel):
     lei_record: LEIRecord | None = None
     seg_social_procedures: list[SegSocialProcedure] = Field(default_factory=list)
     seg_social_organisms: list[SegSocialOrganism] = Field(default_factory=list)
+    adc_processes: list[AdCProcess] = Field(default_factory=list)
+    has_competition_issues: bool = False
     iberinform_content: str | None = None
     source_statuses: list[SourceResult] = Field(default_factory=list)
     queried_at: datetime = Field(default_factory=datetime.utcnow)

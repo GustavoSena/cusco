@@ -8,6 +8,9 @@ interface Props {
 
 type SortField = "contract_price" | "signing_date" | "year";
 
+const INITIAL_LIMIT = 10;
+const LOAD_MORE_STEP = 20;
+
 function formatEUR(value: number | null): string {
   if (value == null) return "-";
   return new Intl.NumberFormat("pt-PT", {
@@ -21,6 +24,7 @@ export function ContractsList({ contracts, totalValue }: Props) {
   const [sortBy, setSortBy] = useState<SortField>("signing_date");
   const [sortDesc, setSortDesc] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_LIMIT);
 
   const sorted = [...contracts].sort((a, b) => {
     const dir = sortDesc ? -1 : 1;
@@ -40,6 +44,9 @@ export function ContractsList({ contracts, totalValue }: Props) {
       setSortDesc(true);
     }
   };
+
+  const visible = sorted.slice(0, visibleCount);
+  const hasMore = visibleCount < contracts.length;
 
   return (
     <div className="bg-white rounded-lg border p-6">
@@ -81,7 +88,7 @@ export function ContractsList({ contracts, totalValue }: Props) {
               </tr>
             </thead>
             <tbody>
-              {sorted.slice(0, 50).map((c) => (
+              {visible.map((c) => (
                 <tr
                   key={c.id || Math.random()}
                   className="border-b last:border-0 hover:bg-gray-50 cursor-pointer"
@@ -102,10 +109,21 @@ export function ContractsList({ contracts, totalValue }: Props) {
               ))}
             </tbody>
           </table>
-          {contracts.length > 50 && (
-            <p className="mt-2 text-sm text-gray-400">
-              Showing 50 of {contracts.length} contracts
-            </p>
+          {hasMore && (
+            <button
+              onClick={() => setVisibleCount((prev) => prev + LOAD_MORE_STEP)}
+              className="mt-3 w-full py-2 text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors"
+            >
+              Show more ({visibleCount} of {contracts.length})
+            </button>
+          )}
+          {!hasMore && contracts.length > INITIAL_LIMIT && (
+            <button
+              onClick={() => setVisibleCount(INITIAL_LIMIT)}
+              className="mt-3 w-full py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded transition-colors"
+            >
+              Show less
+            </button>
           )}
         </div>
       )}
