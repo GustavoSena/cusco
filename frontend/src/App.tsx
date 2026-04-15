@@ -2,7 +2,7 @@ import { useState } from "react";
 import { SearchBar } from "./components/SearchBar";
 import { EntityReport } from "./components/EntityReport";
 import { ChatPanel } from "./components/ChatPanel";
-import { searchByNif, searchByName } from "./api/client";
+import { searchByNifStream, searchByName } from "./api/client";
 import type {
   EntityReport as EntityReportType,
   NameSearchMatch,
@@ -21,8 +21,9 @@ export default function App() {
     setReport(null);
     setNameResults([]);
     try {
-      const result = await searchByNif(nif);
-      setReport(result);
+      await searchByNifStream(nif, (partial) => {
+        setReport(partial);
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -77,10 +78,12 @@ export default function App() {
         {report && (
           <>
             <EntityReport report={report} />
-            <ChatPanel
-              key={report.nif + report.queried_at}
-              report={report}
-            />
+            {!loading && (
+              <ChatPanel
+                key={report.nif + report.queried_at}
+                report={report}
+              />
+            )}
           </>
         )}
 

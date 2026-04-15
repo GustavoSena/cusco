@@ -10,17 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse
 
 from pydantic import BaseModel, Field
-from .models import EntityReport, SourceResult, SourceStatus
-from .sources import (
-    NifSource,
-    CitiusSource,
-    DevedoresSource,
-    ContractsSource,
-   
-)
 from .chat import stream_chat
 from .models import ChatRequest, EntityReport, SourceResult, SourceStatus
-from .sources import NifSource, CitiusSource, DevedoresSource, ContractsSource,  EntitiesSource,IberinformSource, GleifSource, SegSocialSource
+from .sources import NifSource, CitiusSource, DevedoresSource, ContractsSource, EntitiesSource, IberinformSource, GleifSource, SegSocialSource
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -130,38 +122,117 @@ async def search_entity(
 
     for source_name, data, status in results:
         report.source_statuses.append(status)
-        if data is None:
-            continue
-
-        if "company" in data:
-            report.company = data["company"]
-        if "contracts" in data:
-            report.contracts = data["contracts"]
-            report.contracts_total_value = data.get("contracts_total_value", 0)
-        if "insolvency_proceedings" in data:
-            report.insolvency_proceedings = data["insolvency_proceedings"]
-            report.has_insolvency = data.get("has_insolvency", False)
-        if "debtor" in data:
-            report.debtor = data["debtor"]
-            report.is_tax_debtor = data.get("is_tax_debtor", False)
-        if "entity_profile" in data and data["entity_profile"] is not None:
-            report.entity_profile = data["entity_profile"]
-            # Enrich company name from entity profile if missing
-            if report.company and not report.company.name:
-                report.company.name = data["entity_profile"].name
-        if "lei_record" in data and data["lei_record"] is not None:
-            report.lei_record = data["lei_record"]
-            # Enrich company name from LEI if still missing
-            if report.company and not report.company.name:
-                report.company.name = data["lei_record"].legal_name
-        if "seg_social_procedures" in data:
-            report.seg_social_procedures = data["seg_social_procedures"]
-        if "seg_social_organisms" in data:
-            report.seg_social_organisms = data["seg_social_organisms"]
-        if "iberinform_content" in data:
-            report.iberinform_content = data["iberinform_content"]
+        _apply_source_data(report, source_name, data)
 
     return report
+
+
+# Source names in the order they appear in the tasks list
+_SOURCE_NAMES = [
+    "nif", "citius", "devedores", "contracts",
+    "entities", "gleif", "seg_social", "iberinform",
+]
+
+
+def _apply_source_data(report: EntityReport, source_name: str, data: dict | None):
+    """Apply data from a single source to the report (mutates report)."""
+    if data is None:
+        return
+    if "company" in data:
+        report.company = data["company"]
+    if "contracts" in data:
+        report.contracts = data["contracts"]
+        report.contracts_total_value = data.get("contracts_total_value", 0)
+    if "insolvency_proceedings" in data:
+        report.insolvency_proceedings = data["insolvency_proceedings"]
+        report.has_insolvency = data.get("has_insolvency", False)
+    if "debtor" in data:
+        report.debtor = data["debtor"]
+        report.is_tax_debtor = data.get("is_tax_debtor", False)
+    if "entity_profile" in data and data["entity_profile"] is not None:
+        report.entity_profile = data["entity_profile"]
+        if report.company and not report.company.name:
+            report.company.name = data["entity_profile"].name
+    if "lei_record" in data and data["lei_record"] is not None:
+        report.lei_record = data["lei_record"]
+        if report.company and not report.company.name:
+            report.company.name = data["lei_record"].legal_name
+    if "seg_social_procedures" in data:
+        report.seg_social_procedures = data["seg_social_procedures"]
+    if "seg_social_organisms" in data:
+        report.seg_social_organisms = data["seg_social_organisms"]
+    if "iberinform_content" in data:
+        report.iberinform_content = data["iberinform_content"]
+
+
+@app.get("/api/search/stream")
+async def search_entity_stream(
+    nif: str = Query(..., pattern=r"^\d{9}$", description="9-digit NIF"),
+):
+    """Stream search results as SSE — each source sends an event when it completes."""
+
+    async def event_stream():
+        report = EntityReport(nif=nif)
+        # Start with all sources pending
+        report.source_statuses = [
+            SourceResult(source=name, status=SourceStatus.PENDING)
+            for name in _SOURCE_NAMES
+        ]
+
+        # Send initial report with all sources pending
+        yield f"data: {report.model_dump_json()}\n\n"
+
+        # Create tasks for all sources
+        source_coros = {
+            "nif": nif_source.search_by_nif(nif),
+            "citius": citius_source.search_by_nif(nif),
+            "devedores": devedores_source.search_by_nif(nif),
+            "contracts": contracts_source.search_by_nif(nif),
+            "entities": entities_source.search_by_nif(nif),
+            "gleif": gleif_source.search_by_nif(nif),
+            "seg_social": seg_social_source.search_by_nif(nif),
+            "iberinform": iberinform_source.search_by_nif(nif),
+        }
+
+        # Wrap each source in a task that reports its name on completion
+        async def run_and_tag(name: str, coro):
+            _, data, status = await _run_source(name, coro)
+            return name, data, status
+
+        pending = {
+            asyncio.create_task(run_and_tag(name, coro)): name
+            for name, coro in source_coros.items()
+        }
+
+        while pending:
+            done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                source_name = pending.pop(task)
+                name, data, status = task.result()
+
+                # Update the source status from PENDING to its final status
+                for i, s in enumerate(report.source_statuses):
+                    if s.source == source_name:
+                        report.source_statuses[i] = status
+                        break
+
+                # Apply the data to the report
+                _apply_source_data(report, source_name, data)
+
+                # Send updated report
+                yield f"data: {report.model_dump_json()}\n\n"
+
+        # Signal completion
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 async def _search_by_name(name: str) -> NameSearchResult:

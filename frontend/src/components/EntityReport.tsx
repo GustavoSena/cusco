@@ -294,14 +294,19 @@ export function EntityReport({ report }: Props) {
           {report.source_statuses.map((s) => (
             <span
               key={s.source}
-              className={`px-2 py-0.5 text-xs rounded ${
+              className={`px-2 py-0.5 text-xs rounded inline-flex items-center gap-1 ${
                 s.status === "ok"
                   ? "bg-green-100 text-green-700"
-                  : s.status === "timeout"
-                    ? "bg-yellow-100 text-yellow-700"
-                    : "bg-red-100 text-red-700"
+                  : s.status === "pending"
+                    ? "bg-gray-100 text-gray-500"
+                    : s.status === "timeout"
+                      ? "bg-yellow-100 text-yellow-700"
+                      : "bg-red-100 text-red-700"
               }`}
             >
+              {s.status === "pending" && (
+                <span className="inline-block w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
+              )}
               {s.source}: {s.status}
               {s.error && s.status !== "ok" ? ` (${s.error})` : ""}
             </span>

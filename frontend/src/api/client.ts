@@ -11,6 +11,39 @@ export async function searchByNif(nif: string): Promise<EntityReport> {
   return res.json();
 }
 
+export async function searchByNifStream(
+  nif: string,
+  onUpdate: (report: EntityReport) => void,
+): Promise<void> {
+  const res = await fetch(`${BASE}/search/stream?nif=${encodeURIComponent(nif)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("No response stream");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6);
+      if (data === "[DONE]") return;
+      onUpdate(JSON.parse(data));
+    }
+  }
+}
+
 export async function searchByName(name: string): Promise<NameSearchResult> {
   const res = await fetch(`${BASE}/search?name=${encodeURIComponent(name)}`);
   if (!res.ok) {
