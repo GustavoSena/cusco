@@ -161,6 +161,7 @@ class SourceStatus(str, Enum):
     ERROR = "error"
     TIMEOUT = "timeout"
     NOT_FOUND = "not_found"
+    PENDING = "pending"
 
 
 class SourceResult(BaseModel):

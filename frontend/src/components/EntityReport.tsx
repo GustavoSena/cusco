@@ -22,8 +22,82 @@ function entityTypeLabel(type: string): string {
   }
 }
 
+function parseIberinformContent(content: string): {
+  title: string;
+  fields: { label: string; value: string }[];
+  summary: string | null;
+} {
+  const lines = content.split("\n");
+  let title = "";
+  const fields: { label: string; value: string }[] = [];
+  let summary: string | null = null;
+  let currentLabel: string | null = null;
+  let inSummary = false;
+  const summaryLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    // Section title: "## Dados Gerais de COMPANY" or "# Dados Gerais..."
+    if (/^#{1,3}\s+(Dados Gerais|Resumo)/i.test(line)) {
+      if (/resumo/i.test(line)) {
+        inSummary = true;
+        continue;
+      }
+      // Extract company name from "Dados Gerais de COMPANY NAME"
+      const match = line.match(/Dados Gerais\s+de\s+(.+)/i);
+      if (match) title = match[1].trim();
+      continue;
+    }
+
+    if (inSummary) {
+      if (/^#{1,3}\s+/.test(line)) break; // next section, stop
+      if (line) summaryLines.push(line);
+      continue;
+    }
+
+    // Field label: "### Label" or "#### Label"
+    if (/^#{2,4}\s+/.test(line)) {
+      // Save previous field if we had a label with no value
+      if (currentLabel && !fields.find((f) => f.label === currentLabel)) {
+        fields.push({ label: currentLabel, value: "" });
+      }
+      currentLabel = line.replace(/^#{2,4}\s+/, "").trim();
+      continue;
+    }
+
+    // Value line after a label
+    if (currentLabel && line) {
+      // Clean up markdown links: [text](url) → text
+      const cleanValue = line.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").trim();
+      if (cleanValue) {
+        fields.push({ label: currentLabel, value: cleanValue });
+        currentLabel = null;
+      }
+    }
+  }
+
+  if (summaryLines.length > 0) {
+    summary = summaryLines.join(" ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+    // Remove Iberinform promotional boilerplate
+    summary = summary
+      .replace(/Este é um resumo sobre .+$/, "")
+      .replace(/Recomendamo-lo a explorar .+$/, "")
+      .replace(/Ver o relatório alargado .+$/, "")
+      .replace(/Descubra tudo .+$/, "")
+      .replace(/ACESSO GRATUITO/g, "")
+      .trim();
+    if (!summary) summary = null;
+  }
+
+  return { title, fields, summary };
+}
+
 function IberinformSection({ content }: { content: string }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const { title, fields, summary } = parseIberinformContent(content);
+
+  if (fields.length === 0 && !summary) return null;
 
   return (
     <div className="bg-white rounded-lg border">
@@ -33,7 +107,7 @@ function IberinformSection({ content }: { content: string }) {
         className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 transition-colors"
       >
         <span className="font-semibold text-gray-700">
-          Iberinform — Company Profile
+          {title ? `Company Profile` : "Company Profile"}
         </span>
         <svg
           className={`w-5 h-5 text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`}
@@ -50,8 +124,26 @@ function IberinformSection({ content }: { content: string }) {
         </svg>
       </button>
       {expanded && (
-        <div className="border-t p-4 prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap">
-          {content}
+        <div className="border-t">
+          {fields.length > 0 && (
+            <table className="w-full text-sm">
+              <tbody>
+                {fields.map((f, i) => (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="px-4 py-2 text-gray-500 font-medium w-1/3 align-top whitespace-nowrap">
+                      {f.label}
+                    </td>
+                    <td className="px-4 py-2 text-gray-800">{f.value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {summary && (
+            <div className="p-4 border-t">
+              <p className="text-sm text-gray-600 leading-relaxed">{summary}</p>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -80,7 +172,9 @@ export function EntityReport({ report }: Props) {
               )}
             </h2>
             {report.company?.name && (
-              <p className="text-lg text-gray-600 mt-1">{report.company.name}</p>
+              <p className="text-lg text-gray-600 mt-1">
+                {report.company.name}
+              </p>
             )}
             {report.company && (
               <p className="text-sm text-gray-500 mt-1">
@@ -120,14 +214,19 @@ export function EntityReport({ report }: Props) {
           {report.source_statuses.map((s) => (
             <span
               key={s.source}
-              className={`px-2 py-0.5 text-xs rounded ${
+              className={`px-2 py-0.5 text-xs rounded inline-flex items-center gap-1 ${
                 s.status === "ok"
                   ? "bg-green-100 text-green-700"
-                  : s.status === "timeout"
-                    ? "bg-yellow-100 text-yellow-700"
-                    : "bg-red-100 text-red-700"
+                  : s.status === "pending"
+                    ? "bg-gray-100 text-gray-500"
+                    : s.status === "timeout"
+                      ? "bg-yellow-100 text-yellow-700"
+                      : "bg-red-100 text-red-700"
               }`}
             >
+              {s.status === "pending" && (
+                <span className="inline-block w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
+              )}
               {s.source}: {s.status}
               {s.error && s.status !== "ok" ? ` (${s.error})` : ""}
             </span>

@@ -115,7 +115,7 @@ export interface AdCProcess {
 
 export interface SourceResult {
   source: string;
-  status: "ok" | "error" | "timeout" | "not_found";
+  status: "ok" | "error" | "timeout" | "not_found" | "pending";
   error: string | null;
 }
 

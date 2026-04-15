@@ -5,6 +5,8 @@ import os
 import re
 from typing import Any
 
+import httpx
+
 from .base import DataSource
 
 logger = logging.getLogger(__name__)
@@ -55,28 +57,20 @@ class IberinformSource(DataSource):
         """Scrape a URL using Jina Reader."""
         url = f"{JINA_READER_URL}{target_url}"
 
-        async with self._client() as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
             resp = await client.get(
                 url,
                 headers={
                     "Authorization": f"Bearer {api_key}",
-                    "Accept": "text/event-stream",
-                    "X-Respond-With": "readerlm-v2",
+                    "Accept": "application/json",
                     "X-Retain-Images": "none",
                     "X-Return-Format": "markdown",
                 },
             )
             resp.raise_for_status()
 
-            # The SSE response contains data: lines — collect the content
-            content_parts: list[str] = []
-            for line in resp.text.splitlines():
-                if line.startswith("data: "):
-                    content_parts.append(line[6:])
-                elif not line.startswith(":") and line.strip():
-                    content_parts.append(line)
-
-            content = "\n".join(content_parts).strip()
+            data = resp.json()
+            content = data.get("data", {}).get("content", "").strip()
             if content:
                 logger.info(f"[iberinform] Scraped {len(content)} chars (raw)")
                 content = self._extract_sections(content)

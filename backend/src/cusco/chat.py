@@ -59,7 +59,7 @@ async def stream_chat(
     history: list[ChatMessage],
 ) -> AsyncGenerator[str, None]:
     client = openai.AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    model = os.getenv("CUSCO_CHAT_MODEL", "gpt-4o")
+    model = os.getenv("CUSCO_CHAT_MODEL", "gpt-5.1")
 
     system_prompt = build_system_prompt(report)
     messages = build_messages(system_prompt, history, message)

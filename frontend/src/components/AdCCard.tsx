@@ -21,8 +21,12 @@ const DECISION_COLORS: Record<string, string> = {
   "Não oposição com compromissos": "bg-blue-100 text-blue-700",
 };
 
+const INITIAL_LIMIT = 5;
+const LOAD_MORE_STEP = 10;
+
 export function AdCCard({ processes, hasCompetitionIssues }: Props) {
   const [expanded, setExpanded] = useState(hasCompetitionIssues);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_LIMIT);
 
   // Group by type
   const byType: Record<string, AdCProcess[]> = {};
@@ -74,13 +78,16 @@ export function AdCCard({ processes, hasCompetitionIssues }: Props) {
 
       {expanded && processes.length > 0 && (
         <div className="mt-4 space-y-4">
-          {Object.entries(byType).map(([type, procs]) => (
+          {Object.entries(byType).map(([type, procs]) => {
+            const visible = procs.slice(0, visibleCount);
+            const hasMore = visibleCount < procs.length;
+            return (
             <div key={type}>
               <h4 className="text-sm font-medium text-gray-500 mb-2">
                 {TYPE_LABELS[type] || type} ({procs.length})
               </h4>
               <div className="space-y-2">
-                {procs.map((p, i) => (
+                {visible.map((p, i) => (
                   <div
                     key={`${p.process_number}-${i}`}
                     className={`p-3 rounded border ${
@@ -169,8 +176,25 @@ export function AdCCard({ processes, hasCompetitionIssues }: Props) {
                   </div>
                 ))}
               </div>
+              {hasMore && (
+                <button
+                  onClick={() => setVisibleCount((prev) => prev + LOAD_MORE_STEP)}
+                  className="mt-2 w-full py-1.5 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors"
+                >
+                  Show more ({visible.length} of {procs.length})
+                </button>
+              )}
+              {!hasMore && procs.length > INITIAL_LIMIT && (
+                <button
+                  onClick={() => setVisibleCount(INITIAL_LIMIT)}
+                  className="mt-2 w-full py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded transition-colors"
+                >
+                  Show less
+                </button>
+              )}
             </div>
-          ))}
+          );
+          })}
         </div>
       )}
     </div>
