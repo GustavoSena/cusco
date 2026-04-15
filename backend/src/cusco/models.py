@@ -69,6 +69,72 @@ class DebtorRecord(BaseModel):
     found: bool = False
 
 
+class EntityProfile(BaseModel):
+    """Entity profile from IMPIC entity registry (dados.gov.pt)."""
+
+    nif: str
+    name: str = ""
+    country: str | None = None
+    country_code: str | None = None
+    total_contracts: int | None = None
+    times_as_supplier: int | None = None
+    total_value_as_supplier: float | None = None
+    times_as_entity: int | None = None
+    total_value_as_entity: float | None = None
+
+
+class LEIRecord(BaseModel):
+    """Legal Entity Identifier record from GLEIF."""
+
+    lei: str = ""
+    legal_name: str = ""
+    other_names: list[str] = Field(default_factory=list)
+    legal_address: str = ""
+    legal_city: str = ""
+    legal_region: str = ""
+    legal_country: str = ""
+    legal_postal_code: str = ""
+    headquarters_address: str = ""
+    headquarters_city: str = ""
+    headquarters_country: str = ""
+    registered_as: str = ""
+    jurisdiction: str = ""
+    entity_status: str = ""
+    entity_category: str = ""
+    legal_form_code: str = ""
+    registration_status: str = ""
+    initial_registration_date: str = ""
+    last_update_date: str = ""
+    next_renewal_date: str = ""
+
+
+class SegSocialProcedure(BaseModel):
+    """Public recruitment/mobility procedure from Segurança Social."""
+
+    code: str = ""
+    title: str = ""
+    variant: str = ""
+    scope: str = ""  # INTERNAL / EXTERNAL
+    procedure_type: str = ""  # COMMON, etc.
+    career: str = ""
+    service: str = ""  # region/service area
+    publication_date: str = ""
+    expiration_date: str = ""
+    organism_id: str = ""
+    organism_name: str = ""
+    organism_acronym: str = ""
+    documents: list[dict] = Field(default_factory=list)
+
+
+class SegSocialOrganism(BaseModel):
+    """Public organism from Segurança Social procedures."""
+
+    id: str = ""
+    name: str = ""
+    acronym: str = ""
+    procedure_count: int = 0
+
+
 class SourceStatus(str, Enum):
     OK = "ok"
     ERROR = "error"
@@ -93,5 +159,9 @@ class EntityReport(BaseModel):
     has_insolvency: bool = False
     debtor: DebtorRecord | None = None
     is_tax_debtor: bool = False
+    entity_profile: EntityProfile | None = None
+    lei_record: LEIRecord | None = None
+    seg_social_procedures: list[SegSocialProcedure] = Field(default_factory=list)
+    seg_social_organisms: list[SegSocialOrganism] = Field(default_factory=list)
     source_statuses: list[SourceResult] = Field(default_factory=list)
     queried_at: datetime = Field(default_factory=datetime.utcnow)
