@@ -1,17 +1,9 @@
 import { useState } from "react";
 import type { EntityReport } from "../types";
+import { formatEUR } from "../format";
 
 interface Props {
   report: EntityReport;
-}
-
-function formatEUR(value: number | null | undefined): string {
-  if (value == null) return "-";
-  return new Intl.NumberFormat("pt-PT", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(value);
 }
 
 function parseIberinformContent(content: string): {
@@ -108,7 +100,7 @@ export function CompanyProfile({ report }: Props) {
       >
         <h3 className="text-lg font-semibold">Company Profile</h3>
         <svg
-          className={`w-5 h-5 text-stone-400 transition-transform ${showDetails ? "rotate-180" : ""}`}
+          className={`w-5 h-5 text-stone-400 transition-transform duration-300 ${showDetails ? "rotate-180" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -123,8 +115,12 @@ export function CompanyProfile({ report }: Props) {
         </svg>
       </button>
 
-      {showDetails && (
-        <div id="company-profile-content" className="mt-4 space-y-4">
+      <div
+        id="company-profile-content"
+        className="grid-expand"
+        aria-hidden={!showDetails}
+      >
+        <div className="mt-4 space-y-4">
           {/* Iberinform fields — richest source, show first when available */}
           {hasIberinform && (
             <>
@@ -338,7 +334,7 @@ export function CompanyProfile({ report }: Props) {
             </>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

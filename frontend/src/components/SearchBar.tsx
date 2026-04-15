@@ -87,8 +87,8 @@ export function SearchBar({
             type="submit"
             disabled={(!isValidNif && !isNameQuery) || loading || nameLoading}
             className="px-4 sm:px-6 py-3 bg-brand-600 text-white font-medium rounded-lg
-                       hover:bg-brand-700 disabled:bg-stone-300 disabled:cursor-not-allowed
-                       transition-colors whitespace-nowrap"
+                       hover:bg-brand-700 active:scale-[0.97] disabled:bg-stone-300 disabled:cursor-not-allowed
+                       transition-all duration-150 whitespace-nowrap"
           >
             {loading || nameLoading ? (
               <span className="flex items-center gap-2">
@@ -119,7 +119,7 @@ export function SearchBar({
 
       {/* Name search results dropdown */}
       {showResults && nameResults.length > 0 && (
-        <div className="absolute z-10 mt-2 w-full bg-white border border-stone-200 rounded-lg shadow-lg max-h-[60vh] sm:max-h-80 overflow-y-auto">
+        <div className="absolute z-10 mt-2 w-full bg-white border border-stone-200 rounded-lg shadow-lg max-h-[60vh] sm:max-h-80 overflow-y-auto animate-slide-down">
           <div className="px-4 py-2 bg-stone-50 border-b text-xs text-stone-500 font-medium">
             {nameResults.length} matching entities — click to view report
           </div>

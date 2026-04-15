@@ -11,7 +11,7 @@ export function LEICard({ record }: Props) {
   const isActive = record.entity_status === "ACTIVE";
 
   return (
-    <div className="bg-white rounded-lg border border-stone-200 p-6">
+    <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6">
       <div className="flex items-start justify-between">
         <h3 className="text-lg font-semibold flex items-center gap-2">
           LEI Record
@@ -65,7 +65,7 @@ export function LEICard({ record }: Props) {
         {expanded ? "Hide details" : "Show more details"}
       </button>
 
-      {expanded && (
+      <div className="grid-expand" aria-hidden={!expanded}>
         <div className="mt-3 pt-3 border-t grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
           {record.headquarters_address && (
             <div>
@@ -100,7 +100,7 @@ export function LEICard({ record }: Props) {
             <p className="text-stone-700">{record.next_renewal_date || "-"}</p>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -74,7 +74,7 @@ export default function App() {
         {error && (
           <div
             role="alert"
-            className="max-w-2xl mx-auto p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-start justify-between gap-3"
+            className="max-w-2xl mx-auto p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-start justify-between gap-3 animate-fade-in"
           >
             <p>{error}</p>
             <button
@@ -102,7 +102,7 @@ export default function App() {
         )}
 
         {!report && !loading && !error && nameResults.length === 0 && (
-          <div className="text-center mt-24">
+          <div className="text-center mt-24 animate-fade-in-up">
             <p className="text-lg text-stone-500">
               Search by NIF or company name
             </p>

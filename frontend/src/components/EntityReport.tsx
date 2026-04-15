@@ -1,4 +1,4 @@
-import type { EntityReport as EntityReportType } from "../types";
+import type { EntityReport as EntityReportType, SourceResult } from "../types";
 import { InsolvencyBadge } from "./InsolvencyBadge";
 import { DebtorStatus } from "./DebtorStatus";
 import { ContractsList } from "./ContractsList";
@@ -20,7 +20,45 @@ function entityTypeLabel(type: string): string {
   }
 }
 
-// SegSocialSection — hidden until connected to entity-level intelligence
+function SourceStatuses({ statuses }: { statuses: SourceResult[] }) {
+  const ok = statuses.filter((s) => s.status === "ok");
+  const pending = statuses.filter((s) => s.status === "pending");
+  const issues = statuses.filter(
+    (s) => s.status !== "ok" && s.status !== "pending"
+  );
+
+  return (
+    <div className="mt-4 flex gap-1.5 flex-wrap items-center" role="status" aria-label="Data source statuses">
+      {ok.length > 0 && (
+        <span className="px-2 py-0.5 text-xs rounded bg-green-100 text-green-700">
+          {ok.length}/{statuses.length} sources OK
+        </span>
+      )}
+      {pending.map((s) => (
+        <span
+          key={s.source}
+          className="px-2 py-0.5 text-xs rounded bg-stone-100 text-stone-500 inline-flex items-center gap-1"
+        >
+          <span className="inline-block w-2 h-2 rounded-full bg-stone-400 animate-pulse" />
+          {s.source}
+        </span>
+      ))}
+      {issues.map((s) => (
+        <span
+          key={s.source}
+          className={`px-2 py-0.5 text-xs rounded ${
+            s.status === "timeout"
+              ? "bg-yellow-100 text-yellow-700"
+              : "bg-red-100 text-red-700"
+          }`}
+        >
+          {s.source}: {s.status}
+          {s.error ? ` (${s.error})` : ""}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export function EntityReport({ report }: Props) {
   const hasWarnings =
@@ -29,7 +67,7 @@ export function EntityReport({ report }: Props) {
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6">
+      <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6 animate-fade-in-up">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-2xl font-bold tracking-tight">
@@ -78,33 +116,12 @@ export function EntityReport({ report }: Props) {
           )}
         </div>
 
-        {/* Source statuses */}
-        <div className="mt-4 flex gap-1.5 flex-wrap" role="status" aria-label="Data source statuses">
-          {report.source_statuses.map((s) => (
-            <span
-              key={s.source}
-              className={`px-2 py-0.5 text-xs rounded inline-flex items-center gap-1 ${
-                s.status === "ok"
-                  ? "bg-green-100 text-green-700"
-                  : s.status === "pending"
-                    ? "bg-stone-100 text-stone-500"
-                    : s.status === "timeout"
-                      ? "bg-yellow-100 text-yellow-700"
-                      : "bg-red-100 text-red-700"
-              }`}
-            >
-              {s.status === "pending" && (
-                <span className="inline-block w-2 h-2 rounded-full bg-stone-400 animate-pulse" />
-              )}
-              {s.source}: {s.status}
-              {s.error && s.status !== "ok" ? ` (${s.error})` : ""}
-            </span>
-          ))}
-        </div>
+        {/* Source statuses — compact: show summary + only non-ok details */}
+        <SourceStatuses statuses={report.source_statuses} />
       </div>
 
       {/* Risk indicators */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in-up" style={{ animationDelay: "80ms" }}>
         <InsolvencyBadge
           proceedings={report.insolvency_proceedings}
           hasInsolvency={report.has_insolvency}
@@ -116,19 +133,25 @@ export function EntityReport({ report }: Props) {
       </div>
 
       {/* Company Profile — unified identity + stats from LEI, IMPIC, ptdata */}
-      <CompanyProfile report={report} />
+      <div className="animate-fade-in-up" style={{ animationDelay: "160ms" }}>
+        <CompanyProfile report={report} />
+      </div>
 
       {/* Competition Authority (AdC) */}
+      <div className="animate-fade-in-up" style={{ animationDelay: "240ms" }}>
       <AdCCard
         processes={report.adc_processes ?? []}
         hasCompetitionIssues={report.has_competition_issues ?? false}
       />
+      </div>
 
       {/* Contracts */}
+      <div className="animate-fade-in-up" style={{ animationDelay: "320ms" }}>
       <ContractsList
         contracts={report.contracts}
         totalValue={report.contracts_total_value}
       />
+      </div>
 
       {/* Seg Social — hidden until connected to entity-level intelligence */}
     </div>

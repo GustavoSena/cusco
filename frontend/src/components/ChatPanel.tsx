@@ -68,7 +68,7 @@ export function ChatPanel({ report }: Props) {
             Ask about this company
           </span>
           <svg
-            className={`w-5 h-5 text-stone-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+            className={`w-5 h-5 text-stone-400 transition-transform duration-300 ${isExpanded ? "rotate-180" : ""}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -83,8 +83,12 @@ export function ChatPanel({ report }: Props) {
           </svg>
         </button>
 
-        {isExpanded && (
-          <div id="chat-panel-content" className="border-t">
+        <div
+          id="chat-panel-content"
+          className="grid-expand"
+          aria-hidden={!isExpanded}
+        >
+          <div className="border-t">
             <div className="h-64 sm:h-80 overflow-y-auto p-3 sm:p-4 space-y-3">
               {messages.length === 0 && (
                 <p className="text-sm text-stone-400 text-center mt-8">
@@ -137,13 +141,13 @@ export function ChatPanel({ report }: Props) {
               <button
                 type="submit"
                 disabled={isStreaming || !input.trim()}
-                className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:bg-stone-300 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 active:scale-[0.97] disabled:bg-stone-300 disabled:cursor-not-allowed transition-all duration-150"
               >
                 {isStreaming ? "..." : "Send"}
               </button>
             </form>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

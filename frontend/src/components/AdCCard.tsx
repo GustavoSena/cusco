@@ -77,7 +77,11 @@ export function AdCCard({ processes, hasCompetitionIssues }: Props) {
         </p>
       )}
 
-      {expanded && processes.length > 0 && (
+      {processes.length > 0 && (
+        <div
+          className="grid-expand"
+          aria-hidden={!expanded}
+        >
         <div className="mt-4 space-y-4">
           {Object.entries(byType).map(([type, procs]) => {
             const visible = procs.slice(0, visibleCount);
@@ -196,6 +200,7 @@ export function AdCCard({ processes, hasCompetitionIssues }: Props) {
             </div>
           );
           })}
+        </div>
         </div>
       )}
     </div>

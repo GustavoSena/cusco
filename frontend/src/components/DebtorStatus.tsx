@@ -34,7 +34,7 @@ export function DebtorStatus({ debtor, isTaxDebtor }: Props) {
         </div>
       ) : (
         <p className="text-stone-500 text-sm">
-          Not found on the AT public debtor list.
+          No tax debts found on the AT public debtor list.
         </p>
       )}
     </div>

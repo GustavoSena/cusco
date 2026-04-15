@@ -13,9 +13,58 @@
   --color-brand-700: oklch(0.38 0.09 185);
   --color-brand-800: oklch(0.30 0.07 185);
   --color-brand-900: oklch(0.22 0.05 185);
+
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --animate-fade-in-up: fade-in-up 400ms var(--ease-out-quart) both;
+  --animate-fade-in: fade-in 300ms var(--ease-out-quart) both;
+  --animate-slide-down: slide-down 200ms var(--ease-out-quart) both;
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-display);
   letter-spacing: -0.025em;
+}
+
+/* Expand/collapse via CSS grid — animates without layout thrash */
+.grid-expand {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 300ms var(--ease-out-quart);
+}
+.grid-expand[aria-hidden="true"] {
+  grid-template-rows: 0fr;
+}
+.grid-expand > * {
+  overflow: hidden;
+}
+
+/* Reduced motion — disable all animations and transitions */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

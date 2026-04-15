@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Contract } from "../types";
+import { formatEUR } from "../format";
 
 interface Props {
   contracts: Contract[];
@@ -10,15 +11,6 @@ type SortField = "contract_price" | "signing_date" | "year";
 
 const INITIAL_LIMIT = 10;
 const LOAD_MORE_STEP = 20;
-
-function formatEUR(value: number | null): string {
-  if (value == null) return "-";
-  return new Intl.NumberFormat("pt-PT", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(value);
-}
 
 export function ContractsList({ contracts, totalValue }: Props) {
   const [sortBy, setSortBy] = useState<SortField>("signing_date");
