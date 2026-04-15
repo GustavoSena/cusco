@@ -102,6 +102,23 @@ class IberinformSource(DataSource):
                 sections.append(part)
 
         result = "\n".join(sections).strip()
+        if not result:
+            return None
+
+        # Remove Iberinform promotional boilerplate (company name varies)
+        result = re.sub(
+            r"Esta informação sobre .+? é apenas uma breve descrição.+",
+            "",
+            result,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        result = re.sub(
+            r"Pode utilizar a nossa solução.+",
+            "",
+            result,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        result = result.strip()
         return result if result else None
 
     async def search_by_nif(self, nif: str) -> dict[str, Any]:

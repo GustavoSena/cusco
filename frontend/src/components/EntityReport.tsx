@@ -1,10 +1,8 @@
-import { useState } from "react";
 import type { EntityReport as EntityReportType } from "../types";
 import { InsolvencyBadge } from "./InsolvencyBadge";
 import { DebtorStatus } from "./DebtorStatus";
 import { ContractsList } from "./ContractsList";
-import { EntityProfileCard } from "./EntityProfileCard";
-import { LEICard } from "./LEICard";
+import { CompanyProfile } from "./CompanyProfile";
 import { AdCCard } from "./AdCCard";
 
 interface Props {
@@ -22,136 +20,7 @@ function entityTypeLabel(type: string): string {
   }
 }
 
-function parseIberinformContent(content: string): {
-  title: string;
-  fields: { label: string; value: string }[];
-  summary: string | null;
-} {
-  const lines = content.split("\n");
-  let title = "";
-  const fields: { label: string; value: string }[] = [];
-  let summary: string | null = null;
-  let currentLabel: string | null = null;
-  let inSummary = false;
-  const summaryLines: string[] = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-
-    // Section title: "## Dados Gerais de COMPANY" or "# Dados Gerais..."
-    if (/^#{1,3}\s+(Dados Gerais|Resumo)/i.test(line)) {
-      if (/resumo/i.test(line)) {
-        inSummary = true;
-        continue;
-      }
-      // Extract company name from "Dados Gerais de COMPANY NAME"
-      const match = line.match(/Dados Gerais\s+de\s+(.+)/i);
-      if (match) title = match[1].trim();
-      continue;
-    }
-
-    if (inSummary) {
-      if (/^#{1,3}\s+/.test(line)) break; // next section, stop
-      if (line) summaryLines.push(line);
-      continue;
-    }
-
-    // Field label: "### Label" or "#### Label"
-    if (/^#{2,4}\s+/.test(line)) {
-      // Save previous field if we had a label with no value
-      if (currentLabel && !fields.find((f) => f.label === currentLabel)) {
-        fields.push({ label: currentLabel, value: "" });
-      }
-      currentLabel = line.replace(/^#{2,4}\s+/, "").trim();
-      continue;
-    }
-
-    // Value line after a label
-    if (currentLabel && line) {
-      // Clean up markdown links: [text](url) → text
-      const cleanValue = line.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").trim();
-      if (cleanValue) {
-        fields.push({ label: currentLabel, value: cleanValue });
-        currentLabel = null;
-      }
-    }
-  }
-
-  if (summaryLines.length > 0) {
-    summary = summaryLines.join(" ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
-    // Remove Iberinform promotional boilerplate
-    summary = summary
-      .replace(/Este é um resumo sobre .+$/, "")
-      .replace(/Recomendamo-lo a explorar .+$/, "")
-      .replace(/Ver o relatório alargado .+$/, "")
-      .replace(/Descubra tudo .+$/, "")
-      .replace(/ACESSO GRATUITO/g, "")
-      .trim();
-    if (!summary) summary = null;
-  }
-
-  return { title, fields, summary };
-}
-
-function IberinformSection({ content }: { content: string }) {
-  const [expanded, setExpanded] = useState(true);
-  const { title, fields, summary } = parseIberinformContent(content);
-
-  if (fields.length === 0 && !summary) return null;
-
-  return (
-    <div className="bg-white rounded-lg border">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 transition-colors"
-      >
-        <span className="font-semibold text-gray-700">
-          {title ? `Company Profile` : "Company Profile"}
-        </span>
-        <svg
-          className={`w-5 h-5 text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 9l-7 7-7-7"
-          />
-        </svg>
-      </button>
-      {expanded && (
-        <div className="border-t">
-          {fields.length > 0 && (
-            <table className="w-full text-sm">
-              <tbody>
-                {fields.map((f, i) => (
-                  <tr key={i} className="border-b last:border-0">
-                    <td className="px-4 py-2 text-gray-500 font-medium w-1/3 align-top whitespace-nowrap">
-                      {f.label}
-                    </td>
-                    <td className="px-4 py-2 text-gray-800">{f.value}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {summary && (
-            <div className="p-4 border-t">
-              <p className="text-sm text-gray-600 leading-relaxed">{summary}</p>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // SegSocialSection — hidden until connected to entity-level intelligence
-// Kept as a comment for future use when Seg Social data is mapped to entities
 
 export function EntityReport({ report }: Props) {
   const hasWarnings =
@@ -246,24 +115,14 @@ export function EntityReport({ report }: Props) {
         />
       </div>
 
+      {/* Company Profile — unified identity + stats from LEI, IMPIC, ptdata */}
+      <CompanyProfile report={report} />
+
       {/* Competition Authority (AdC) */}
       <AdCCard
         processes={report.adc_processes ?? []}
         hasCompetitionIssues={report.has_competition_issues ?? false}
       />
-
-      {/* LEI Record */}
-      {report.lei_record && <LEICard record={report.lei_record} />}
-
-      {/* Entity Profile (IMPIC stats) */}
-      {report.entity_profile && (
-        <EntityProfileCard profile={report.entity_profile} />
-      )}
-
-      {/* Iberinform */}
-      {report.iberinform_content && (
-        <IberinformSection content={report.iberinform_content} />
-      )}
 
       {/* Contracts */}
       <ContractsList
