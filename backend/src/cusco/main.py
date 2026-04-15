@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import StreamingResponse
 
 from pydantic import BaseModel, Field
 from .models import EntityReport, SourceResult, SourceStatus
@@ -14,10 +16,11 @@ from .sources import (
     CitiusSource,
     DevedoresSource,
     ContractsSource,
-    EntitiesSource,
-    GleifSource,
-    SegSocialSource,
+   
 )
+from .chat import stream_chat
+from .models import ChatRequest, EntityReport, SourceResult, SourceStatus
+from .sources import NifSource, CitiusSource, DevedoresSource, ContractsSource,  EntitiesSource,IberinformSource, GleifSource, SegSocialSource
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,6 +33,7 @@ contracts_source = ContractsSource(timeout=120, years=[2026, 2025, 2024])
 entities_source = EntitiesSource(timeout=120)
 gleif_source = GleifSource(timeout=15)
 seg_social_source = SegSocialSource(timeout=20)
+iberinform_source = IberinformSource(timeout=60)
 
 
 @asynccontextmanager
@@ -116,6 +120,7 @@ async def search_entity(
         _run_source("entities", entities_source.search_by_nif(nif)),
         _run_source("gleif", gleif_source.search_by_nif(nif)),
         _run_source("seg_social", seg_social_source.search_by_nif(nif)),
+        _run_source("iberinform", iberinform_source.search_by_nif(nif)),
     ]
 
     results = await asyncio.gather(*tasks)
@@ -153,6 +158,8 @@ async def search_entity(
             report.seg_social_procedures = data["seg_social_procedures"]
         if "seg_social_organisms" in data:
             report.seg_social_organisms = data["seg_social_organisms"]
+        if "iberinform_content" in data:
+            report.iberinform_content = data["iberinform_content"]
 
     return report
 
@@ -204,6 +211,16 @@ async def _search_by_name(name: str) -> NameSearchResult:
         query=name,
         results=matches[:50],
         total_matches=len(matches),
+    )
+
+@app.post("/api/chat")
+async def chat(request: ChatRequest):
+    """Chat about an entity report using an LLM."""
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise HTTPException(500, "OpenAI API key not configured")
+    return StreamingResponse(
+        stream_chat(request.report, request.message, request.history),
+        media_type="text/event-stream",
     )
 
 

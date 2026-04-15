@@ -43,6 +43,11 @@ export interface SourceResult {
   error: string | null;
 }
 
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface EntityReport {
   nif: string;
   company: CompanyInfo | null;
@@ -52,6 +57,7 @@ export interface EntityReport {
   has_insolvency: boolean;
   debtor: DebtorRecord | null;
   is_tax_debtor: boolean;
+  iberinform_content: string | null;
   source_statuses: SourceResult[];
   queried_at: string;
 }

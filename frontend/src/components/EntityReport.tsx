@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { EntityReport as EntityReportType } from "../types";
 import { InsolvencyBadge } from "./InsolvencyBadge";
 import { DebtorStatus } from "./DebtorStatus";
@@ -16,6 +17,42 @@ function entityTypeLabel(type: string): string {
     default:
       return "Unknown";
   }
+}
+
+function IberinformSection({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="bg-white rounded-lg border">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 transition-colors"
+      >
+        <span className="font-semibold text-gray-700">
+          Iberinform — Company Profile
+        </span>
+        <svg
+          className={`w-5 h-5 text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M19 9l-7 7-7-7"
+          />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="border-t p-4 prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap">
+          {content}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function EntityReport({ report }: Props) {
@@ -91,6 +128,11 @@ export function EntityReport({ report }: Props) {
           isTaxDebtor={report.is_tax_debtor}
         />
       </div>
+
+      {/* Iberinform */}
+      {report.iberinform_content && (
+        <IberinformSection content={report.iberinform_content} />
+      )}
 
       {/* Contracts */}
       <ContractsList
