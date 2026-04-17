@@ -1,8 +1,6 @@
 # Cusco
 
-**Cusco** is an entity intelligence platform for Portuguese companies. Given a NIF (tax identification number), it aggregates data from multiple official government sources — public contracts, insolvency proceedings, and tax debtor lists — into a single report.
-
-Built for [Agents Day Braga 2026](https://taikai.network/en/layerx/hackathons/agents-day-braga-2026/overview).
+**Cusco** is an internal entity intelligence platform for Portuguese companies. Given a NIF (tax identification number), it aggregates data from multiple official government sources — public contracts, insolvency proceedings, tax debtor lists, competition authority sanctions, and more — into a single consolidated report.
 
 ## Problem
 
