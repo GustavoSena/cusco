@@ -74,6 +74,31 @@ function buildFindings(report: EntityReport): Finding[] {
     });
   }
 
+  if (isSourceDone(report, "prr") && report.has_prr_funding) {
+    findings.push({
+      type: "info",
+      label: `PRR funding: ${formatEUR(report.prr_total_paid)} paid of ${formatEUR(report.prr_total_contracted)} contracted`,
+    });
+  }
+
+  if (isSourceDone(report, "pt2030") && report.has_pt2030_funding) {
+    findings.push({
+      type: "info",
+      label: `PT2030 funding: ${formatEUR(report.pt2030_total_fund_paid)} paid of ${formatEUR(report.pt2030_total_fund_approved)} approved`,
+    });
+  }
+
+  if (
+    report.corporate_group &&
+    (report.corporate_group.children?.length ?? 0) > 0
+  ) {
+    const count = report.corporate_group.total_children;
+    findings.push({
+      type: "info",
+      label: `Corporate group: ${count} subsidiar${count !== 1 ? "ies" : "y"}`,
+    });
+  }
+
   return findings;
 }
 

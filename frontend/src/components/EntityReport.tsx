@@ -5,11 +5,14 @@ import { ContractsList } from "./ContractsList";
 import { CompanyProfile } from "./CompanyProfile";
 import { AdCCard } from "./AdCCard";
 import { IntelligenceSummary } from "./IntelligenceSummary";
+import { CorporateGroupCard } from "./CorporateGroupCard";
+import { EUFundingCard } from "./EUFundingCard";
 import { StreamSection, SkeletonHalfCard, SkeletonCard } from "./Skeleton";
 
 interface Props {
   report: EntityReportType;
   loading?: boolean;
+  onSelectNif?: (nif: string) => void;
 }
 
 function entityTypeLabel(type: string): string {
@@ -63,7 +66,7 @@ function SourceStatuses({ statuses }: { statuses: SourceResult[] }) {
   );
 }
 
-export function EntityReport({ report, loading = false }: Props) {
+export function EntityReport({ report, loading = false, onSelectNif }: Props) {
   const hasWarnings =
     report.has_insolvency || report.is_tax_debtor || report.has_competition_issues;
 
@@ -159,11 +162,42 @@ export function EntityReport({ report, loading = false }: Props) {
         <CompanyProfile report={report} />
       </StreamSection>
 
+      {/* Corporate Group — populated via GLEIF enrichment */}
+      {report.corporate_group && (
+        <StreamSection
+          source="gleif"
+          report={report}
+          skeleton={<SkeletonCard lines={4} />}
+        >
+          <CorporateGroupCard
+            group={report.corporate_group}
+            onSelectNif={onSelectNif ?? (() => {})}
+          />
+        </StreamSection>
+      )}
+
       {/* Competition Authority (AdC) */}
       <AdCCard
         processes={report.adc_processes ?? []}
         hasCompetitionIssues={report.has_competition_issues ?? false}
       />
+
+      {/* EU Funding (PRR + PT2030) */}
+      <StreamSection
+        source={["prr", "pt2030"]}
+        report={report}
+        skeleton={<SkeletonCard lines={5} />}
+      >
+        <EUFundingCard
+          prrFundings={report.prr_fundings ?? []}
+          prrContracts={report.prr_contracts ?? []}
+          prrTotalContracted={report.prr_total_contracted ?? 0}
+          prrTotalPaid={report.prr_total_paid ?? 0}
+          pt2030Fundings={report.pt2030_fundings ?? []}
+          pt2030TotalFundApproved={report.pt2030_total_fund_approved ?? 0}
+          pt2030TotalFundPaid={report.pt2030_total_fund_paid ?? 0}
+        />
+      </StreamSection>
 
       {/* Contracts */}
       <StreamSection
