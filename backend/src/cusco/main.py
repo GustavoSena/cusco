@@ -12,7 +12,8 @@ from starlette.responses import StreamingResponse
 
 from pydantic import BaseModel, Field
 from .chat import stream_chat
-from .models import ChatRequest, EntityReport, SourceResult, SourceStatus
+from .models import ChatRequest, EntityReport, OverviewRequest, SourceResult, SourceStatus
+from .overview import stream_overview
 from .sources import (
     NifSource,
     CitiusSource,
@@ -352,6 +353,26 @@ async def chat(request: ChatRequest):
         stream_chat(request.report, request.message, request.history),
         media_type="text/event-stream",
     )
+
+
+@app.post("/api/overview")
+async def overview(request: OverviewRequest):
+    """Stream an AI-generated company overview."""
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise HTTPException(503, "AI overview not configured (OPENAI_API_KEY not set)")
+    return StreamingResponse(
+        stream_overview(request.report),
+        media_type="text/event-stream",
+    )
+
+
+@app.get("/api/config")
+async def config():
+    """Client-facing config — tells frontend what features are available."""
+    return {
+        "ai_overview_available": bool(os.environ.get("OPENAI_API_KEY")),
+        "chat_available": bool(os.environ.get("OPENAI_API_KEY")),
+    }
 
 
 @app.get("/api/health")

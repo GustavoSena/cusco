@@ -201,3 +201,7 @@ class ChatRequest(BaseModel):
     message: str
     history: list[ChatMessage] = Field(default_factory=list)
     report: EntityReport
+
+
+class OverviewRequest(BaseModel):
+    report: EntityReport
