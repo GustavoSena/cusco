@@ -56,7 +56,8 @@ Frontend runs on http://localhost:5173 and proxies `/api/*` to the backend on :8
 |----------|----------|---------|
 | `JINA_API_KEY` | For company profiles | [Jina](https://jina.ai) API key for Iberinform scraping |
 | `OPENAI_API_KEY` | For chat | OpenAI API key for the report chat feature |
-| `CUSCO_CACHE_DIR` | No | Cache directory (default: `/tmp/cusco_cache`) |
+| `CUSCO_CACHE_DIR` | No | Bulk data cache directory (default: `/tmp/cusco_cache`) |
+| `CUSCO_AI_CACHE_DIR` | No | AI overview cache directory (default: `~/.cusco/cache/overviews`). Persistent across restarts so generated summaries are reused. |
 | `CUSCO_CHAT_MODEL` | No | LLM model for chat (default: `gpt-5.1`) |
 
 ## API

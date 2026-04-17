@@ -67,7 +67,9 @@ Entry point: `backend/src/cusco/main.py` — FastAPI app with two endpoints:
 
 **Models** in `backend/src/cusco/models.py` — Pydantic models for all data types. Frontend TypeScript interfaces in `frontend/src/types.ts` must mirror these (see "Frontend integration" below).
 
-**Caching**: File-based in `/tmp/cusco_cache/` (configurable via `CUSCO_CACHE_DIR`). Contracts: 24h TTL. Entities: 24h TTL. Debtor PDFs: 7-day TTL.
+**Caching**: Two separate caches with different persistence strategies.
+- Bulk data (contracts, entities, debtor PDFs, AdC processes): `/tmp/cusco_cache/` (configurable via `CUSCO_CACHE_DIR`). Ephemeral by design — data is re-downloadable. Contracts/entities 24h TTL, debtor PDFs/AdC 7-day TTL.
+- AI overviews: `~/.cusco/cache/overviews/` (configurable via `CUSCO_AI_CACHE_DIR`). Persistent across reboots because LLM output is expensive to regenerate. 30-day TTL with hash-based invalidation — the cache is keyed by a content hash of the report (excluding transient fields), so stale data auto-invalidates when sources change.
 
 **Bulk data loading**: `ContractsSource` and `EntitiesSource` load large datasets into memory at startup via background tasks. The server starts immediately and serves requests while data loads. Until loaded, those sources return empty results (not errors).
 

@@ -17,9 +17,27 @@ from cusco.models import EntityReport
 
 logger = logging.getLogger(__name__)
 
-CACHE_DIR = Path(os.environ.get("CUSCO_CACHE_DIR", "/tmp/cusco_cache"))
-OVERVIEW_CACHE_DIR = CACHE_DIR / "overviews"
-CACHE_MAX_AGE_SECONDS = 24 * 3600  # 24 hours — same as contracts
+# AI-generated overviews use a persistent cache location that survives
+# backend restarts and system reboots. Bulk data sources (contracts, entities,
+# etc.) still use CUSCO_CACHE_DIR (default /tmp/cusco_cache) since that data
+# is easily re-downloaded, but LLM output is expensive and worth persisting.
+#
+# Override via CUSCO_AI_CACHE_DIR. Falls back to CUSCO_CACHE_DIR/overviews
+# for backwards compatibility if someone was relying on the old location.
+def _resolve_overview_cache_dir() -> Path:
+    explicit = os.environ.get("CUSCO_AI_CACHE_DIR")
+    if explicit:
+        return Path(explicit)
+    legacy_root = os.environ.get("CUSCO_CACHE_DIR")
+    if legacy_root:
+        return Path(legacy_root) / "overviews"
+    return Path.home() / ".cusco" / "cache" / "overviews"
+
+
+OVERVIEW_CACHE_DIR = _resolve_overview_cache_dir()
+# 30 days — hash-based invalidation catches real data changes, so the TTL
+# is just a safety net for prompt tweaks or model upgrades.
+CACHE_MAX_AGE_SECONDS = 30 * 24 * 3600
 
 # Truncation limits shared with chat.py — keeps LLM context size predictable
 MAX_CONTRACTS_IN_CONTEXT = 5100
