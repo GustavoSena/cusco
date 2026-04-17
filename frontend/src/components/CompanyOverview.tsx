@@ -10,7 +10,7 @@ interface Props {
 export function CompanyOverview({ report, loading }: Props) {
   const [narrative, setNarrative] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -19,7 +19,7 @@ export function CompanyOverview({ report, loading }: Props) {
 
     // Reset state for a new NIF/report
     setNarrative("");
-    setFailed(false);
+    setErrorMessage(null);
     setStreaming(true);
 
     const controller = new AbortController();
@@ -27,19 +27,23 @@ export function CompanyOverview({ report, loading }: Props) {
 
     streamOverview(
       report,
-      (chunk) => {
-        setNarrative((prev) => prev + chunk);
+      {
+        onChunk: (chunk) => {
+          setNarrative((prev) => prev + chunk);
+        },
+        onError: (message) => {
+          setErrorMessage(message);
+        },
       },
       controller.signal,
     )
-      .then(() => {
-        setStreaming(false);
-      })
+      .then(() => setStreaming(false))
       .catch((err) => {
-        // Ignore aborts triggered by unmount/NIF change
         if (controller.signal.aborted) return;
         console.warn("Overview stream failed", err);
-        setFailed(true);
+        setErrorMessage(
+          err instanceof Error ? err.message : "Overview unavailable",
+        );
         setStreaming(false);
       });
 
@@ -49,18 +53,46 @@ export function CompanyOverview({ report, loading }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report.nif, loading]);
 
-  // If it failed and there's nothing to show, hide the component entirely
-  if (failed && !narrative) return null;
-
   // Don't render anything while waiting for the main report to stream
-  if (loading && !narrative) return null;
+  if (loading && !narrative && !errorMessage) return null;
+
+  // Error state — show a subtle "unavailable" notice (user deserves to know why the card is empty)
+  if (errorMessage && !narrative) {
+    return (
+      <section
+        aria-labelledby="overview-heading"
+        className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6 animate-fade-in"
+      >
+        <h3
+          id="overview-heading"
+          className="text-lg font-semibold tracking-tight mb-2"
+        >
+          Overview
+        </h3>
+        <p className="text-sm text-stone-500">
+          AI summary unavailable — {errorMessage.toLowerCase()}.
+        </p>
+      </section>
+    );
+  }
 
   return (
-    <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6 animate-fade-in-up">
+    <section
+      aria-labelledby="overview-heading"
+      className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6 animate-fade-in-up"
+    >
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-semibold tracking-tight">Overview</h3>
+        <h3
+          id="overview-heading"
+          className="text-lg font-semibold tracking-tight"
+        >
+          Overview
+        </h3>
         {streaming && (
-          <span className="text-xs text-stone-400 flex items-center gap-1.5">
+          <span
+            className="text-xs text-stone-500 flex items-center gap-1.5"
+            aria-live="polite"
+          >
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse" />
             Generating...
           </span>
@@ -68,11 +100,20 @@ export function CompanyOverview({ report, loading }: Props) {
       </div>
 
       {narrative ? (
-        <div className="prose prose-sm max-w-none text-stone-700 whitespace-pre-wrap leading-relaxed">
+        <div
+          className="text-stone-700 whitespace-pre-wrap leading-relaxed text-sm sm:text-base"
+          aria-live="polite"
+          aria-busy={streaming}
+        >
           {narrative}
         </div>
       ) : (
-        <div className="space-y-2" aria-hidden="true">
+        <div
+          className="space-y-2"
+          aria-hidden="true"
+          role="status"
+          aria-label="Generating company overview"
+        >
           <div className="h-3 bg-stone-100 rounded animate-pulse w-full" />
           <div className="h-3 bg-stone-100 rounded animate-pulse w-11/12" />
           <div className="h-3 bg-stone-100 rounded animate-pulse w-10/12" />
@@ -82,10 +123,11 @@ export function CompanyOverview({ report, loading }: Props) {
       )}
 
       {narrative && !streaming && (
-        <p className="mt-4 text-xs text-stone-400 border-t border-stone-100 pt-3">
-          AI-generated summary from aggregated public data. May contain inaccuracies.
+        <p className="mt-4 text-xs text-stone-500 border-t border-stone-100 pt-3">
+          AI-generated summary from aggregated public data. May contain
+          inaccuracies.
         </p>
       )}
-    </div>
+    </section>
   );
 }

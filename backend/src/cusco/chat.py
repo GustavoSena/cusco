@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator
 import openai
 
 from cusco.models import ChatMessage, EntityReport
+from cusco.overview import truncate_report_for_llm
 
 SYSTEM_PROMPT_TEMPLATE = """\
 You are an analyst specializing in Portuguese company intelligence. \
@@ -22,24 +23,8 @@ Report data:
 {report_json}
 """
 
-MAX_CONTRACTS_IN_CONTEXT = 5100
-MAX_IBERINFORM_CHARS = 4000
-
-
 def build_system_prompt(report: EntityReport) -> str:
-    data = report.model_dump(mode="json")
-    if len(data.get("contracts", [])) > MAX_CONTRACTS_IN_CONTEXT:
-        total = len(data["contracts"])
-        data["contracts"] = data["contracts"][:MAX_CONTRACTS_IN_CONTEXT]
-        data["_note"] = (
-            f"Showing {MAX_CONTRACTS_IN_CONTEXT} of {total} contracts. "
-            f"Total contract value across all {total}: {report.contracts_total_value}"
-        )
-    # Truncate iberinform content to avoid blowing up the context
-    if data.get("iberinform_content"):
-        content = data["iberinform_content"]
-        if len(content) > MAX_IBERINFORM_CHARS:
-            data["iberinform_content"] = content[:MAX_IBERINFORM_CHARS] + "\n...(truncated)"
+    data = truncate_report_for_llm(report)
     report_json = json.dumps(data, ensure_ascii=False, indent=2, default=str)
     return SYSTEM_PROMPT_TEMPLATE.format(nif=report.nif, report_json=report_json)
 

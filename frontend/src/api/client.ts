@@ -71,9 +71,14 @@ export async function fetchConfig(): Promise<{
   return res.json();
 }
 
+export interface OverviewHandlers {
+  onChunk: (text: string) => void;
+  onError?: (message: string) => void;
+}
+
 export async function streamOverview(
   report: EntityReport,
-  onChunk: (text: string) => void,
+  handlers: OverviewHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch(`${BASE}/overview`, {
@@ -98,14 +103,29 @@ export async function streamOverview(
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
+    // SSE events are separated by double newlines; split on that boundary
+    // so that data: payloads containing single newlines stay intact.
+    const events = buffer.split("\n\n");
+    buffer = events.pop() ?? "";
 
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      const data = line.slice(6);
-      if (data === "[DONE]") return;
-      onChunk(data);
+    for (const event of events) {
+      if (!event.startsWith("data: ")) continue;
+      const data = event.slice(6);
+      try {
+        const parsed = JSON.parse(data) as
+          | { type: "chunk"; text: string }
+          | { type: "error"; message: string }
+          | { type: "done" };
+        if (parsed.type === "chunk") {
+          handlers.onChunk(parsed.text);
+        } else if (parsed.type === "error") {
+          handlers.onError?.(parsed.message);
+        } else if (parsed.type === "done") {
+          return;
+        }
+      } catch {
+        // Skip malformed event
+      }
     }
   }
 }

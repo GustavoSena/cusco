@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import time
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
@@ -12,7 +13,6 @@ from pathlib import Path
 
 import openai
 
-from cusco.chat import MAX_CONTRACTS_IN_CONTEXT, MAX_IBERINFORM_CHARS
 from cusco.models import EntityReport
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 CACHE_DIR = Path(os.environ.get("CUSCO_CACHE_DIR", "/tmp/cusco_cache"))
 OVERVIEW_CACHE_DIR = CACHE_DIR / "overviews"
 CACHE_MAX_AGE_SECONDS = 24 * 3600  # 24 hours — same as contracts
+
+# Truncation limits shared with chat.py — keeps LLM context size predictable
+MAX_CONTRACTS_IN_CONTEXT = 5100
+MAX_IBERINFORM_CHARS = 4000
 
 # Fake-streaming parameters for cache hits
 _CACHED_CHUNK_SIZE = 20
@@ -52,9 +56,10 @@ Report data:
 """
 
 
-def build_overview_prompt(report: EntityReport) -> str:
-    """Build the LLM prompt by serializing the report with the same truncation
-    limits used by the chat endpoint, so context size stays predictable."""
+def truncate_report_for_llm(report: EntityReport) -> dict:
+    """Shared truncation helper. Keeps the LLM context predictable by capping
+    contract list size and Iberinform content. Drops transient fields that
+    don't affect either a narrative or Q&A (queried_at, source_statuses)."""
     data = report.model_dump(mode="json")
 
     if len(data.get("contracts", [])) > MAX_CONTRACTS_IN_CONTEXT:
@@ -68,12 +73,18 @@ def build_overview_prompt(report: EntityReport) -> str:
     if data.get("iberinform_content"):
         content = data["iberinform_content"]
         if len(content) > MAX_IBERINFORM_CHARS:
-            data["iberinform_content"] = content[:MAX_IBERINFORM_CHARS] + "\n...(truncated)"
+            data["iberinform_content"] = (
+                content[:MAX_IBERINFORM_CHARS] + "\n...(truncated)"
+            )
 
-    # Strip noisy/transient fields that don't affect the narrative
+    return data
+
+
+def build_overview_prompt(report: EntityReport) -> str:
+    data = truncate_report_for_llm(report)
+    # Overview narrative doesn't need per-source status or timestamp
     data.pop("queried_at", None)
     data.pop("source_statuses", None)
-
     report_json = json.dumps(data, ensure_ascii=False, indent=2, default=str)
     return OVERVIEW_SYSTEM_PROMPT.format(nif=report.nif, report_json=report_json)
 
@@ -95,7 +106,6 @@ def _cache_file(nif: str) -> Path:
 
 
 def get_cached_overview(nif: str, report_hash: str) -> str | None:
-    """Return cached narrative if present, fresh, and the hash matches."""
     path = _cache_file(nif)
     if not path.exists():
         return None
@@ -121,7 +131,8 @@ def get_cached_overview(nif: str, report_hash: str) -> str | None:
 
 
 def save_cached_overview(nif: str, report_hash: str, narrative: str) -> None:
-    """Persist narrative to disk for future cache hits."""
+    """Persist narrative atomically: write to temp file, rename into place.
+    Prevents corrupt JSON if the server is killed mid-write."""
     try:
         OVERVIEW_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -129,34 +140,51 @@ def save_cached_overview(nif: str, report_hash: str, narrative: str) -> None:
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "narrative": narrative,
         }
-        with open(_cache_file(nif), "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
+        target = _cache_file(nif)
+        # Write to tmp file in same dir then os.replace for atomicity
+        fd, tmp_path = tempfile.mkstemp(
+            dir=OVERVIEW_CACHE_DIR, prefix=f".{nif}.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp_path, target)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except OSError as e:
         logger.warning(f"Failed to save cached overview for {nif}: {e}")
 
 
-def _sse(chunk: str) -> str:
-    return f"data: {chunk}\n\n"
+def _sse_event(event_type: str, **kwargs) -> str:
+    """Emit a JSON-encoded SSE event. Protects against LLM output containing
+    newlines or the literal string '[DONE]' which would break plain-text SSE."""
+    payload = json.dumps({"type": event_type, **kwargs}, ensure_ascii=False)
+    return f"data: {payload}\n\n"
 
 
 async def _stream_cached(narrative: str) -> AsyncGenerator[str, None]:
-    """Stream a cached narrative back as SSE chunks so the UI behaves
-    consistently with the live-streaming path."""
+    """Stream a cached narrative back as SSE chunks for UI consistency."""
     for i in range(0, len(narrative), _CACHED_CHUNK_SIZE):
-        yield _sse(narrative[i : i + _CACHED_CHUNK_SIZE])
+        yield _sse_event("chunk", text=narrative[i : i + _CACHED_CHUNK_SIZE])
         await asyncio.sleep(_CACHED_CHUNK_DELAY_SECONDS)
 
 
 async def stream_overview(report: EntityReport) -> AsyncGenerator[str, None]:
-    """Stream an LLM-generated company overview as SSE.
+    """Stream an LLM-generated company overview as JSON-encoded SSE events.
 
-    Uses a disk cache keyed by NIF + a content hash of the report so we don't
-    pay for OpenAI calls when the underlying data hasn't changed.
+    Event types:
+      {"type": "chunk", "text": "..."}      — narrative chunk
+      {"type": "error", "message": "..."}   — generation failed
+      {"type": "done"}                      — stream complete
     """
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        yield _sse("[Error: OpenAI API key not configured]")
-        yield _sse("[DONE]")
+        yield _sse_event("error", message="OpenAI API key not configured")
+        yield _sse_event("done")
         return
 
     report_hash = _hash_report_for_cache(report)
@@ -165,7 +193,7 @@ async def stream_overview(report: EntityReport) -> AsyncGenerator[str, None]:
     if cached is not None:
         async for chunk in _stream_cached(cached):
             yield chunk
-        yield _sse("[DONE]")
+        yield _sse_event("done")
         return
 
     client = openai.AsyncOpenAI(api_key=api_key)
@@ -185,18 +213,21 @@ async def stream_overview(report: EntityReport) -> AsyncGenerator[str, None]:
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta and delta.content:
                 collected.append(delta.content)
-                yield _sse(delta.content)
+                yield _sse_event("chunk", text=delta.content)
     except openai.RateLimitError:
-        yield _sse("[Error: OpenAI rate limit exceeded. Please try again in a moment.]")
-        yield _sse("[DONE]")
+        yield _sse_event(
+            "error",
+            message="OpenAI rate limit exceeded. Please try again in a moment.",
+        )
+        yield _sse_event("done")
         return
     except openai.APIError as e:
-        yield _sse(f"[Error: {e.message}]")
-        yield _sse("[DONE]")
+        yield _sse_event("error", message=str(e.message))
+        yield _sse_event("done")
         return
 
     narrative = "".join(collected).strip()
     if narrative:
         save_cached_overview(report.nif, report_hash, narrative)
 
-    yield _sse("[DONE]")
+    yield _sse_event("done")

@@ -144,8 +144,9 @@ export function EntityReport({
       {aiOverviewAvailable && (
         <button
           onClick={() => setDetailsExpanded(!detailsExpanded)}
-          className="w-full py-2.5 text-sm text-stone-600 hover:text-stone-900 hover:bg-stone-50 rounded-lg border border-stone-200 transition-colors flex items-center justify-center gap-2"
+          className="w-full py-2.5 text-sm text-stone-600 hover:text-stone-900 hover:bg-stone-50 rounded-lg border border-stone-200 transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
           aria-expanded={detailsExpanded}
+          aria-controls="entity-report-details"
         >
           <svg
             className={`w-4 h-4 transition-transform ${detailsExpanded ? "rotate-180" : ""}`}
@@ -166,7 +167,7 @@ export function EntityReport({
       )}
 
       {/* Detailed sections — collapsible when the AI overview is available */}
-      <div className="grid-expand" aria-hidden={!detailsExpanded}>
+      <div id="entity-report-details" className="grid-expand" aria-hidden={!detailsExpanded}>
         <div>
           <div className="space-y-6">
             {/* Intelligence Summary */}
