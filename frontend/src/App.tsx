@@ -91,7 +91,7 @@ export default function App() {
 
         {report && (
           <>
-            <EntityReport report={report} />
+            <EntityReport report={report} loading={loading} />
             {!loading && (
               <ChatPanel
                 key={report.nif + report.queried_at}

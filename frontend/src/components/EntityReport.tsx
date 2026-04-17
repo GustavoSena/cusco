@@ -4,9 +4,16 @@ import { DebtorStatus } from "./DebtorStatus";
 import { ContractsList } from "./ContractsList";
 import { CompanyProfile } from "./CompanyProfile";
 import { AdCCard } from "./AdCCard";
+import { IntelligenceSummary } from "./IntelligenceSummary";
+import {
+  SkeletonCard,
+  SkeletonHalfCard,
+  StreamSection,
+} from "./Skeleton";
 
 interface Props {
   report: EntityReportType;
+  loading?: boolean;
 }
 
 function entityTypeLabel(type: string): string {
@@ -28,7 +35,11 @@ function SourceStatuses({ statuses }: { statuses: SourceResult[] }) {
   );
 
   return (
-    <div className="mt-4 flex gap-1.5 flex-wrap items-center" role="status" aria-label="Data source statuses">
+    <div
+      className="mt-4 flex gap-1.5 flex-wrap items-center"
+      role="status"
+      aria-label="Data source statuses"
+    >
       {ok.length > 0 && (
         <span className="px-2 py-0.5 text-xs rounded bg-green-100 text-green-700">
           {ok.length}/{statuses.length} sources OK
@@ -60,9 +71,11 @@ function SourceStatuses({ statuses }: { statuses: SourceResult[] }) {
   );
 }
 
-export function EntityReport({ report }: Props) {
+export function EntityReport({ report, loading = false }: Props) {
   const hasWarnings =
-    report.has_insolvency || report.is_tax_debtor || report.has_competition_issues;
+    report.has_insolvency ||
+    report.is_tax_debtor ||
+    report.has_competition_issues;
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
@@ -88,7 +101,6 @@ export function EntityReport({ report }: Props) {
                 {entityTypeLabel(report.company.entity_type)}
               </p>
             )}
-            {/* LEI inline if available */}
             {report.lei_record && (
               <p className="text-xs text-stone-400 mt-1 font-mono">
                 LEI: {report.lei_record.lei}
@@ -116,44 +128,62 @@ export function EntityReport({ report }: Props) {
           )}
         </div>
 
-        {/* Source statuses — compact: show summary + only non-ok details */}
         <SourceStatuses statuses={report.source_statuses} />
       </div>
 
+      {/* Intelligence Summary — synthesized findings */}
+      <IntelligenceSummary report={report} loading={loading} />
+
       {/* Risk indicators */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in-up" style={{ animationDelay: "80ms" }}>
-        <InsolvencyBadge
-          proceedings={report.insolvency_proceedings}
-          hasInsolvency={report.has_insolvency}
-        />
-        <DebtorStatus
-          debtor={report.debtor}
-          isTaxDebtor={report.is_tax_debtor}
-        />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <StreamSection
+          source="citius"
+          report={report}
+          skeleton={<SkeletonHalfCard />}
+        >
+          <InsolvencyBadge
+            proceedings={report.insolvency_proceedings}
+            hasInsolvency={report.has_insolvency}
+          />
+        </StreamSection>
+        <StreamSection
+          source="devedores"
+          report={report}
+          skeleton={<SkeletonHalfCard />}
+        >
+          <DebtorStatus
+            debtor={report.debtor}
+            isTaxDebtor={report.is_tax_debtor}
+          />
+        </StreamSection>
       </div>
 
-      {/* Company Profile — unified identity + stats from LEI, IMPIC, ptdata */}
-      <div className="animate-fade-in-up" style={{ animationDelay: "160ms" }}>
+      {/* Company Profile */}
+      <StreamSection
+        source={["entities", "gleif"]}
+        report={report}
+        skeleton={<SkeletonCard lines={5} />}
+      >
         <CompanyProfile report={report} />
-      </div>
+      </StreamSection>
 
       {/* Competition Authority (AdC) */}
-      <div className="animate-fade-in-up" style={{ animationDelay: "240ms" }}>
       <AdCCard
         processes={report.adc_processes ?? []}
         hasCompetitionIssues={report.has_competition_issues ?? false}
       />
-      </div>
 
       {/* Contracts */}
-      <div className="animate-fade-in-up" style={{ animationDelay: "320ms" }}>
-      <ContractsList
-        contracts={report.contracts}
-        totalValue={report.contracts_total_value}
-      />
-      </div>
-
-      {/* Seg Social — hidden until connected to entity-level intelligence */}
+      <StreamSection
+        source="contracts"
+        report={report}
+        skeleton={<SkeletonCard lines={6} />}
+      >
+        <ContractsList
+          contracts={report.contracts}
+          totalValue={report.contracts_total_value}
+        />
+      </StreamSection>
     </div>
   );
 }
