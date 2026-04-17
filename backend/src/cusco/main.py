@@ -12,7 +12,13 @@ from starlette.responses import StreamingResponse
 
 from pydantic import BaseModel, Field
 from .chat import stream_chat
-from .models import ChatRequest, EntityReport, SourceResult, SourceStatus
+from .models import (
+    ChatRequest,
+    CorporateGroup,
+    EntityReport,
+    SourceResult,
+    SourceStatus,
+)
 from .sources import (
     NifSource,
     CitiusSource,
@@ -23,6 +29,8 @@ from .sources import (
     GleifSource,
     SegSocialSource,
     AdCSource,
+    PRRSource,
+    PT2030Source,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -38,6 +46,8 @@ gleif_source = GleifSource(timeout=15)
 seg_social_source = SegSocialSource(timeout=20)
 iberinform_source = IberinformSource(timeout=60)
 adc_source = AdCSource(timeout=60)
+prr_source = PRRSource(timeout=120)
+pt2030_source = PT2030Source(timeout=60)
 
 
 @asynccontextmanager
@@ -46,6 +56,8 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_bg_load_contracts())
     asyncio.create_task(_bg_load_entities())
     asyncio.create_task(_bg_load_adc())
+    asyncio.create_task(_bg_load_prr())
+    asyncio.create_task(_bg_load_pt2030())
     yield
     logger.info("Cusco shutting down.")
 
@@ -72,6 +84,22 @@ async def _bg_load_adc():
         logger.info("AdC processes loaded in background.")
     except Exception as e:
         logger.warning(f"Background AdC load failed (will retry on query): {e}")
+
+
+async def _bg_load_prr():
+    try:
+        await prr_source._ensure_loaded()
+        logger.info("PRR data loaded in background.")
+    except Exception as e:
+        logger.warning(f"Background PRR load failed (will retry on query): {e}")
+
+
+async def _bg_load_pt2030():
+    try:
+        await pt2030_source._ensure_loaded()
+        logger.info("PT2030 data loaded in background.")
+    except Exception as e:
+        logger.warning(f"Background PT2030 load failed (will retry on query): {e}")
 
 
 app = FastAPI(
@@ -114,6 +142,7 @@ async def _run_source(name: str, coro) -> tuple[str, dict | None, SourceResult]:
 _SOURCE_NAMES = [
     "nif", "citius", "devedores", "contracts",
     "entities", "gleif", "seg_social", "iberinform",
+    "prr", "pt2030",
 ]
 
 
@@ -149,6 +178,19 @@ def _apply_source_data(report: EntityReport, source_name: str, data: dict | None
     if "adc_processes" in data:
         report.adc_processes = data["adc_processes"]
         report.has_competition_issues = data.get("has_competition_issues", False)
+    if "prr_fundings" in data:
+        report.prr_fundings = data["prr_fundings"]
+        report.prr_contracts = data.get("prr_contracts", [])
+        report.has_prr_funding = data.get("has_prr_funding", False)
+        report.prr_total_contracted = data.get("prr_total_contracted", 0.0)
+        report.prr_total_paid = data.get("prr_total_paid", 0.0)
+    if "pt2030_fundings" in data:
+        report.pt2030_fundings = data["pt2030_fundings"]
+        report.has_pt2030_funding = data.get("has_pt2030_funding", False)
+        report.pt2030_total_fund_approved = data.get(
+            "pt2030_total_fund_approved", 0.0
+        )
+        report.pt2030_total_fund_paid = data.get("pt2030_total_fund_paid", 0.0)
 
 
 async def _enrich_adc(report: EntityReport) -> None:
@@ -192,6 +234,39 @@ async def _enrich_adc(report: EntityReport) -> None:
         logger.warning(f"AdC name cross-reference failed: {e}")
 
 
+async def _enrich_corporate_group(report: EntityReport) -> None:
+    """Fill `corporate_group` from GLEIF parent/child relationships.
+
+    Silent no-op if the entity has no LEI record.
+    """
+    if report.corporate_group is not None:
+        return
+    lei = report.lei_record.lei if report.lei_record else ""
+    if not lei:
+        return
+
+    try:
+        group = await gleif_source.get_corporate_group(lei)
+    except Exception as e:
+        logger.warning(f"GLEIF corporate group fetch failed for {lei}: {e}")
+        return
+
+    parent = group.get("direct_parent")
+    children = group.get("direct_children", []) or []
+    total = group.get("total_children", len(children))
+    has_more = group.get("has_more_children", False)
+
+    if not parent and not children:
+        return
+
+    report.corporate_group = CorporateGroup(
+        parent=parent,
+        children=children,
+        total_children=total,
+        has_more_children=has_more,
+    )
+
+
 @app.get("/api/search")
 async def search_entity(
     nif: str | None = Query(None, pattern=r"^\d{9}$", description="9-digit NIF"),
@@ -214,6 +289,8 @@ async def search_entity(
         _run_source("gleif", gleif_source.search_by_nif(nif)),
         _run_source("seg_social", seg_social_source.search_by_nif(nif)),
         _run_source("iberinform", iberinform_source.search_by_nif(nif)),
+        _run_source("prr", prr_source.search_by_nif(nif)),
+        _run_source("pt2030", pt2030_source.search_by_nif(nif)),
     ]
 
     results = await asyncio.gather(*tasks)
@@ -226,6 +303,9 @@ async def search_entity(
 
     # AdC cross-reference by company name
     await _enrich_adc(report)
+
+    # Corporate group via GLEIF parent/children
+    await _enrich_corporate_group(report)
 
     return report
 
@@ -254,6 +334,8 @@ async def search_entity_stream(
             "gleif": gleif_source.search_by_nif(nif),
             "seg_social": seg_social_source.search_by_nif(nif),
             "iberinform": iberinform_source.search_by_nif(nif),
+            "prr": prr_source.search_by_nif(nif),
+            "pt2030": pt2030_source.search_by_nif(nif),
         }
 
         async def run_and_tag(name: str, coro):
@@ -281,6 +363,9 @@ async def search_entity_stream(
 
         # AdC cross-reference after all sources complete
         await _enrich_adc(report)
+
+        # Corporate group via GLEIF parent/children
+        await _enrich_corporate_group(report)
         yield f"data: {report.model_dump_json()}\n\n"
 
         yield "data: [DONE]\n\n"
