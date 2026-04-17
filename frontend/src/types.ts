@@ -140,6 +140,7 @@ export interface CorporateGroup {
   parent: GroupMember | null;
   children: GroupMember[];
   total_children: number;
+  has_more_children: boolean;
 }
 
 export interface AdCProcess {

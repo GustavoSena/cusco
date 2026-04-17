@@ -11,6 +11,7 @@ indexed by NIF for fast lookup.
 
 from __future__ import annotations
 
+import datetime as _dt
 import io
 import json
 import logging
@@ -75,6 +76,37 @@ class PT2030Source(DataSource):
         self._loaded = True
         logger.info(f"Indexed PT2030: {len(self._by_nif)} NIFs")
 
+    def _read_cache(self, path: Path) -> list[dict] | None:
+        """Read a cached JSON file. Returns None if missing, corrupt, or
+        unreadable — caller should re-download in that case."""
+        if not path.exists():
+            return None
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(f"PT2030 cache {path.name} unreadable ({e}); re-downloading")
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            return None
+
+    def _write_cache_atomic(self, path: Path, data: list[dict]) -> None:
+        """Write JSON atomically (tmp file + rename) so a crash mid-write
+        doesn't leave a corrupt cache."""
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        try:
+            with open(tmp, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
+
     async def _load_rows(self) -> list[dict]:
         cache_file = CACHE_DIR / "pt2030_entidades.json"
 
@@ -82,16 +114,14 @@ class PT2030Source(DataSource):
             age = time.time() - cache_file.stat().st_mtime
             if age < CACHE_MAX_AGE_SECONDS:
                 logger.info("Loading PT2030 entidades from cache")
-                with open(cache_file) as f:
-                    return json.load(f)
+                cached = self._read_cache(cache_file)
+                if cached is not None:
+                    return cached
 
         url = await self._find_xlsx_url()
         if not url:
             logger.warning("Could not find PT2030 entidades download URL")
-            if cache_file.exists():
-                with open(cache_file) as f:
-                    return json.load(f)
-            return []
+            return self._read_cache(cache_file) or []
 
         async with self._client() as client:
             logger.info(f"Downloading PT2030 entidades from {url}...")
@@ -99,8 +129,7 @@ class PT2030Source(DataSource):
             resp.raise_for_status()
             rows = self._parse_xlsx(resp.content)
 
-            with open(cache_file, "w") as f:
-                json.dump(rows, f)
+            self._write_cache_atomic(cache_file, rows)
             logger.info(f"Loaded {len(rows)} PT2030 entidades rows")
             return rows
 
@@ -127,6 +156,11 @@ class PT2030Source(DataSource):
                 if not header:
                     continue
                 value = row[idx] if idx < len(row) else None
+                # openpyxl returns datetime objects for date cells — not JSON
+                # serializable. Convert to ISO strings during parse so the
+                # cached JSON round-trips cleanly.
+                if isinstance(value, (_dt.datetime, _dt.date)):
+                    value = value.isoformat()
                 record[header] = value
             if any(v not in (None, "") for v in record.values()):
                 out.append(record)

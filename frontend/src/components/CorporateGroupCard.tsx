@@ -81,8 +81,14 @@ function MemberRow({
     );
   }
 
+  // Non-PT member — display only. Visually dimmed + no hover affordance so
+  // users understand it isn't interactive (foreign NIFs aren't queryable
+  // against our PT-only data sources).
   return (
-    <div className="w-full p-3 rounded border border-stone-200 bg-stone-50">
+    <div
+      className="w-full p-3 rounded border border-dashed border-stone-200 bg-stone-50/60 opacity-80"
+      title="Foreign entity — not searchable in this tool"
+    >
       {content}
     </div>
   );
@@ -137,19 +143,27 @@ export function CorporateGroupCard({ group, onSelectNif }: Props) {
             </div>
             {hasMore && !expanded && (
               <button
+                type="button"
                 onClick={() => setExpanded(true)}
-                className="mt-2 w-full py-1.5 text-xs text-brand-600 hover:text-brand-800 hover:bg-brand-50 rounded transition-colors"
+                className="mt-2 w-full py-1.5 text-xs text-brand-600 hover:text-brand-800 hover:bg-brand-50 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1"
               >
                 Show {children.length - INITIAL_LIMIT} more
               </button>
             )}
             {expanded && hasMore && (
               <button
+                type="button"
                 onClick={() => setExpanded(false)}
-                className="mt-2 w-full py-1.5 text-xs text-stone-500 hover:text-stone-700 hover:bg-stone-50 rounded transition-colors"
+                className="mt-2 w-full py-1.5 text-xs text-stone-500 hover:text-stone-700 hover:bg-stone-50 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1"
               >
                 Show less
               </button>
+            )}
+            {group.has_more_children && (
+              <p className="mt-2 text-xs text-stone-400 text-center">
+                +{group.total_children - children.length} more subsidiaries not
+                shown (GLEIF pagination limit)
+              </p>
             )}
           </div>
         )}

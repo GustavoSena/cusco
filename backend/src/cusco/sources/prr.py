@@ -14,6 +14,7 @@ by NIF in-memory (24h TTL). Pattern mirrors `contracts.py` / `entities.py`.
 
 from __future__ import annotations
 
+import datetime as _dt
 import io
 import json
 import logging
@@ -47,6 +48,49 @@ def _safe_float(val: Any) -> float | None:
         return float(str(val).replace(",", ".").replace(" ", ""))
     except (ValueError, TypeError):
         return None
+
+
+def _read_cache_json(path: Path) -> list[dict] | None:
+    """Read a cached JSON list. Returns None if missing, corrupt, or
+    unreadable — caller should re-download. Deletes corrupt files so the
+    next run starts clean."""
+    if not path.exists():
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"PRR cache {path.name} unreadable ({e}); re-downloading")
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return None
+
+
+def _write_cache_atomic(path: Path, data: list[dict]) -> None:
+    """Atomic write via tmp + rename so a crash mid-write doesn't leave
+    a corrupt cache file."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert openpyxl cell values to JSON-serializable equivalents.
+    Datetime and date cells become ISO strings; everything else passes through.
+    """
+    if isinstance(value, (_dt.datetime, _dt.date)):
+        return value.isoformat()
+    return value
 
 
 def _normalize_nif(val: Any) -> str:
@@ -104,16 +148,14 @@ class PRRSource(DataSource):
             age = time.time() - cache_file.stat().st_mtime
             if age < CACHE_MAX_AGE_SECONDS:
                 logger.info("Loading PRR entidades from cache")
-                with open(cache_file) as f:
-                    return json.load(f)
+                cached = _read_cache_json(cache_file)
+                if cached is not None:
+                    return cached
 
         url = await self._find_resource_url(DATASET_API_ENTIDADES, "entidades")
         if not url:
             logger.warning("Could not find PRR entidades download URL")
-            if cache_file.exists():
-                with open(cache_file) as f:
-                    return json.load(f)
-            return []
+            return _read_cache_json(cache_file) or []
 
         async with self._client() as client:
             logger.info(f"Downloading PRR entidades from {url}...")
@@ -121,13 +163,40 @@ class PRRSource(DataSource):
             resp.raise_for_status()
             rows = self._parse_prr_entidades_xlsx(resp.content)
 
-            with open(cache_file, "w") as f:
-                json.dump(rows, f)
+            _write_cache_atomic(cache_file, rows)
             logger.info(f"Loaded {len(rows)} PRR entidades rows")
             return rows
 
-    def _parse_prr_entidades_xlsx(self, xlsx_bytes: bytes) -> list[dict]:
-        """Parse the PRR entidades XLSX into list[dict]."""
+    # Columns we actually read downstream — parser drops everything else to
+    # minimize resident memory (750K rows × unused columns = ~hundreds of MB).
+    _ENTIDADES_COLUMNS = frozenset([
+        "nif_entidade",
+        "ds_entidade",
+        "papel_entidade",
+        "atividade_economica",
+        "localizacao_sede",
+        "valor_contratado",
+        "valor_pago",
+        "dt_referencia",
+        "cd_projeto",
+    ])
+
+    _CONTRATOS_COLUMNS = frozenset([
+        "cd_entidade",
+        "cd_contrato",
+        "ds_contrato",
+        "ds_entidade",
+        "ds_papel_entidade_contrato",
+        "valor_contrato",
+        "dt_referencia",
+    ])
+
+    def _parse_xlsx_rows(
+        self, xlsx_bytes: bytes, keep_columns: frozenset[str]
+    ) -> list[dict]:
+        """Parse an XLSX workbook into list[dict], retaining only the columns
+        listed in ``keep_columns``. Unknown/empty headers are dropped entirely,
+        which keeps the resident index small even for 750K+ row datasets."""
         from openpyxl import load_workbook
 
         wb = load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
@@ -141,21 +210,29 @@ class PRRSource(DataSource):
         except StopIteration:
             return []
 
+        # Precompute which column indexes we need, skipping everything else
+        keep_idx = [
+            (idx, header)
+            for idx, header in enumerate(headers)
+            if header in keep_columns
+        ]
+
         out: list[dict] = []
         for row in rows_iter:
             if row is None:
                 continue
             record = {}
-            for idx, header in enumerate(headers):
-                if not header:
-                    continue
-                value = row[idx] if idx < len(row) else None
-                record[header] = value
+            for idx, header in keep_idx:
+                raw_val = row[idx] if idx < len(row) else None
+                record[header] = _json_safe(raw_val)
             if any(v not in (None, "") for v in record.values()):
                 out.append(record)
 
         wb.close()
         return out
+
+    def _parse_prr_entidades_xlsx(self, xlsx_bytes: bytes) -> list[dict]:
+        return self._parse_xlsx_rows(xlsx_bytes, self._ENTIDADES_COLUMNS)
 
     def _index_fundings(self, rows: list[dict]) -> None:
         for row in rows:
@@ -184,18 +261,16 @@ class PRRSource(DataSource):
             age = time.time() - cache_file.stat().st_mtime
             if age < CACHE_MAX_AGE_SECONDS:
                 logger.info("Loading PRR contratos from cache")
-                with open(cache_file) as f:
-                    return json.load(f)
+                cached = _read_cache_json(cache_file)
+                if cached is not None:
+                    return cached
 
         url = await self._find_resource_url(
             DATASET_API_CONTRATOS, "contratos"
         )
         if not url:
             logger.warning("Could not find PRR contratos download URL")
-            if cache_file.exists():
-                with open(cache_file) as f:
-                    return json.load(f)
-            return []
+            return _read_cache_json(cache_file) or []
 
         async with self._client() as client:
             logger.info(f"Downloading PRR contratos from {url}...")
@@ -203,14 +278,12 @@ class PRRSource(DataSource):
             resp.raise_for_status()
             rows = self._parse_prr_contratos_xlsx(resp.content)
 
-            with open(cache_file, "w") as f:
-                json.dump(rows, f)
+            _write_cache_atomic(cache_file, rows)
             logger.info(f"Loaded {len(rows)} PRR contratos rows")
             return rows
 
     def _parse_prr_contratos_xlsx(self, xlsx_bytes: bytes) -> list[dict]:
-        # Same shape as the entidades parser — reuse.
-        return self._parse_prr_entidades_xlsx(xlsx_bytes)
+        return self._parse_xlsx_rows(xlsx_bytes, self._CONTRATOS_COLUMNS)
 
     def _index_contracts(self, rows: list[dict]) -> None:
         for row in rows:

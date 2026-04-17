@@ -48,7 +48,7 @@ function Section({
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-stone-50"
+        className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-inset rounded"
       >
         <span className="text-sm font-medium text-stone-700">
           {title} ({count})
@@ -161,10 +161,11 @@ export function EUFundingCard({
             </table>
             {prrProjectsCount < prrF.length && (
               <button
+                type="button"
                 onClick={() =>
                   setPrrProjectsCount((c) => c + INITIAL_ROWS * 2)
                 }
-                className="mt-2 w-full py-1.5 text-xs text-brand-600 hover:text-brand-800 hover:bg-brand-50 rounded transition-colors"
+                className="mt-2 w-full py-1.5 text-xs text-brand-600 hover:text-brand-800 hover:bg-brand-50 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1"
               >
                 Show more ({prrProjectsCount} of {prrF.length})
               </button>
@@ -210,10 +211,11 @@ export function EUFundingCard({
             </table>
             {prrContractsCount < prrC.length && (
               <button
+                type="button"
                 onClick={() =>
                   setPrrContractsCount((c) => c + INITIAL_ROWS * 2)
                 }
-                className="mt-2 w-full py-1.5 text-xs text-brand-600 hover:text-brand-800 hover:bg-brand-50 rounded transition-colors"
+                className="mt-2 w-full py-1.5 text-xs text-brand-600 hover:text-brand-800 hover:bg-brand-50 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1"
               >
                 Show more ({prrContractsCount} of {prrC.length})
               </button>
@@ -260,8 +262,9 @@ export function EUFundingCard({
             </table>
             {pt2030Count < pt2030F.length && (
               <button
+                type="button"
                 onClick={() => setPt2030Count((c) => c + INITIAL_ROWS * 2)}
-                className="mt-2 w-full py-1.5 text-xs text-brand-600 hover:text-brand-800 hover:bg-brand-50 rounded transition-colors"
+                className="mt-2 w-full py-1.5 text-xs text-brand-600 hover:text-brand-800 hover:bg-brand-50 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1"
               >
                 Show more ({pt2030Count} of {pt2030F.length})
               </button>

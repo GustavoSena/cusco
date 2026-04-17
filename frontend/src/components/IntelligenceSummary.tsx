@@ -88,15 +88,21 @@ function buildFindings(report: EntityReport): Finding[] {
     });
   }
 
-  if (
-    report.corporate_group &&
-    (report.corporate_group.children?.length ?? 0) > 0
-  ) {
-    const count = report.corporate_group.total_children;
-    findings.push({
-      type: "info",
-      label: `Corporate group: ${count} subsidiar${count !== 1 ? "ies" : "y"}`,
-    });
+  if (report.corporate_group) {
+    const cg = report.corporate_group;
+    const childCount = cg.children?.length ?? 0;
+    if (childCount > 0) {
+      const count = cg.total_children || childCount;
+      findings.push({
+        type: "info",
+        label: `Corporate group: ${count} subsidiar${count !== 1 ? "ies" : "y"}`,
+      });
+    } else if (cg.parent) {
+      findings.push({
+        type: "info",
+        label: `Subsidiary of ${cg.parent.name || "a parent company"}`,
+      });
+    }
   }
 
   return findings;
