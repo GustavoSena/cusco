@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SearchBar } from "./components/SearchBar";
 import { EntityReport } from "./components/EntityReport";
 import { ChatPanel } from "./components/ChatPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { searchByNifStream, searchByName } from "./api/client";
+import { searchByNifStream, searchByName, fetchConfig } from "./api/client";
 import type {
   EntityReport as EntityReportType,
   NameSearchMatch,
@@ -15,6 +15,13 @@ export default function App() {
   const [nameLoading, setNameLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nameResults, setNameResults] = useState<NameSearchMatch[]>([]);
+  const [aiOverviewAvailable, setAiOverviewAvailable] = useState(false);
+
+  useEffect(() => {
+    fetchConfig()
+      .then((cfg) => setAiOverviewAvailable(cfg.ai_overview_available))
+      .catch(() => setAiOverviewAvailable(false));
+  }, []);
 
   const handleSearchNif = async (nif: string) => {
     setLoading(true);
@@ -91,7 +98,11 @@ export default function App() {
 
         {report && (
           <>
-            <EntityReport report={report} loading={loading} />
+            <EntityReport
+              report={report}
+              loading={loading}
+              aiOverviewAvailable={aiOverviewAvailable}
+            />
             {!loading && (
               <ChatPanel
                 key={report.nif + report.queried_at}

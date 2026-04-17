@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { EntityReport as EntityReportType, SourceResult } from "../types";
 import { InsolvencyBadge } from "./InsolvencyBadge";
 import { DebtorStatus } from "./DebtorStatus";
@@ -5,11 +6,13 @@ import { ContractsList } from "./ContractsList";
 import { CompanyProfile } from "./CompanyProfile";
 import { AdCCard } from "./AdCCard";
 import { IntelligenceSummary } from "./IntelligenceSummary";
+import { CompanyOverview } from "./CompanyOverview";
 import { StreamSection, SkeletonHalfCard, SkeletonCard } from "./Skeleton";
 
 interface Props {
   report: EntityReportType;
   loading?: boolean;
+  aiOverviewAvailable?: boolean;
 }
 
 function entityTypeLabel(type: string): string {
@@ -63,9 +66,18 @@ function SourceStatuses({ statuses }: { statuses: SourceResult[] }) {
   );
 }
 
-export function EntityReport({ report, loading = false }: Props) {
+export function EntityReport({
+  report,
+  loading = false,
+  aiOverviewAvailable = false,
+}: Props) {
   const hasWarnings =
     report.has_insolvency || report.is_tax_debtor || report.has_competition_issues;
+
+  // When the AI overview is available, collapse the detailed sections by default
+  // so the overview is the focal point. When it isn't, fall back to the legacy
+  // behaviour (details visible).
+  const [detailsExpanded, setDetailsExpanded] = useState(!aiOverviewAvailable);
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
@@ -123,59 +135,96 @@ export function EntityReport({ report, loading = false }: Props) {
         <SourceStatuses statuses={report.source_statuses} />
       </div>
 
-      {/* Intelligence Summary */}
-      <IntelligenceSummary report={report} loading={loading} />
+      {/* AI-generated overview */}
+      {aiOverviewAvailable && (
+        <CompanyOverview report={report} loading={loading} />
+      )}
 
-      {/* Risk indicators */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <StreamSection
-          source="citius"
-          report={report}
-          skeleton={<SkeletonHalfCard />}
+      {/* Collapse toggle — only shown when the overview is available */}
+      {aiOverviewAvailable && (
+        <button
+          onClick={() => setDetailsExpanded(!detailsExpanded)}
+          className="w-full py-2.5 text-sm text-stone-600 hover:text-stone-900 hover:bg-stone-50 rounded-lg border border-stone-200 transition-colors flex items-center justify-center gap-2"
+          aria-expanded={detailsExpanded}
         >
-          <InsolvencyBadge
-            proceedings={report.insolvency_proceedings}
-            hasInsolvency={report.has_insolvency}
-          />
-        </StreamSection>
-        <StreamSection
-          source="devedores"
-          report={report}
-          skeleton={<SkeletonHalfCard />}
-        >
-          <DebtorStatus
-            debtor={report.debtor}
-            isTaxDebtor={report.is_tax_debtor}
-          />
-        </StreamSection>
+          <svg
+            className={`w-4 h-4 transition-transform ${detailsExpanded ? "rotate-180" : ""}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+          {detailsExpanded ? "Hide detailed sections" : "Show detailed sections"}
+        </button>
+      )}
+
+      {/* Detailed sections — collapsible when the AI overview is available */}
+      <div className="grid-expand" aria-hidden={!detailsExpanded}>
+        <div>
+          <div className="space-y-6">
+            {/* Intelligence Summary */}
+            <IntelligenceSummary report={report} loading={loading} />
+
+            {/* Risk indicators */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <StreamSection
+                source="citius"
+                report={report}
+                skeleton={<SkeletonHalfCard />}
+              >
+                <InsolvencyBadge
+                  proceedings={report.insolvency_proceedings}
+                  hasInsolvency={report.has_insolvency}
+                />
+              </StreamSection>
+              <StreamSection
+                source="devedores"
+                report={report}
+                skeleton={<SkeletonHalfCard />}
+              >
+                <DebtorStatus
+                  debtor={report.debtor}
+                  isTaxDebtor={report.is_tax_debtor}
+                />
+              </StreamSection>
+            </div>
+
+            {/* Company Profile — unified identity + stats from LEI, IMPIC, ptdata */}
+            <StreamSection
+              source={["entities", "gleif"]}
+              report={report}
+              skeleton={<SkeletonCard lines={5} />}
+            >
+              <CompanyProfile report={report} />
+            </StreamSection>
+
+            {/* Competition Authority (AdC) */}
+            <AdCCard
+              processes={report.adc_processes ?? []}
+              hasCompetitionIssues={report.has_competition_issues ?? false}
+            />
+
+            {/* Contracts */}
+            <StreamSection
+              source="contracts"
+              report={report}
+              skeleton={<SkeletonCard lines={6} />}
+            >
+              <ContractsList
+                contracts={report.contracts}
+                totalValue={report.contracts_total_value}
+              />
+            </StreamSection>
+          </div>
+        </div>
       </div>
-
-      {/* Company Profile — unified identity + stats from LEI, IMPIC, ptdata */}
-      <StreamSection
-        source={["entities", "gleif"]}
-        report={report}
-        skeleton={<SkeletonCard lines={5} />}
-      >
-        <CompanyProfile report={report} />
-      </StreamSection>
-
-      {/* Competition Authority (AdC) */}
-      <AdCCard
-        processes={report.adc_processes ?? []}
-        hasCompetitionIssues={report.has_competition_issues ?? false}
-      />
-
-      {/* Contracts */}
-      <StreamSection
-        source="contracts"
-        report={report}
-        skeleton={<SkeletonCard lines={6} />}
-      >
-        <ContractsList
-          contracts={report.contracts}
-          totalValue={report.contracts_total_value}
-        />
-      </StreamSection>
     </div>
   );
 }
