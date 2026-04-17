@@ -181,6 +181,15 @@ export interface NameSearchResult {
 
 4. **Name Search**: The `/api/search?name=...` endpoint returns `NameSearchResult` (not `EntityReport`). The frontend needs a name search mode in `SearchBar` and a results list component where clicking a result triggers a NIF search. The API client needs a `searchByName(name)` function.
 
+### Git Workflow
+
+All changes go through pull requests — never push directly to main.
+
+1. Create a feature branch: `git checkout -b feat/description`
+2. Commit with descriptive messages
+3. Push and create a PR via `gh pr create`
+4. Merge after review
+
 ### Adding a New Data Source
 
 1. Create a new module in `backend/src/cusco/sources/`
