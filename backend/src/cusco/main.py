@@ -348,7 +348,7 @@ async def _search_by_name(name: str) -> NameSearchResult:
 async def chat(request: ChatRequest):
     """Chat about an entity report using an LLM."""
     if not os.environ.get("OPENAI_API_KEY"):
-        raise HTTPException(500, "OpenAI API key not configured")
+        raise HTTPException(503, "AI chat not configured (OPENAI_API_KEY not set)")
     return StreamingResponse(
         stream_chat(request.report, request.message, request.history),
         media_type="text/event-stream",

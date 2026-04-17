@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { EntityReport as EntityReportType, SourceResult } from "../types";
 import { InsolvencyBadge } from "./InsolvencyBadge";
 import { DebtorStatus } from "./DebtorStatus";
@@ -77,7 +77,19 @@ export function EntityReport({
   // When the AI overview is available, collapse the detailed sections by default
   // so the overview is the focal point. When it isn't, fall back to the legacy
   // behaviour (details visible).
+  //
+  // `aiOverviewAvailable` comes from /api/config which resolves after mount.
+  // If the user searches before it lands, the initial value is `false`, so we
+  // sync via effect once the flag flips — but only if the user hasn't manually
+  // toggled the panel. That keeps user intent sticky.
   const [detailsExpanded, setDetailsExpanded] = useState(!aiOverviewAvailable);
+  const [userToggled, setUserToggled] = useState(false);
+
+  useEffect(() => {
+    if (!userToggled) {
+      setDetailsExpanded(!aiOverviewAvailable);
+    }
+  }, [aiOverviewAvailable, userToggled]);
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
@@ -143,7 +155,10 @@ export function EntityReport({
       {/* Collapse toggle — only shown when the overview is available */}
       {aiOverviewAvailable && (
         <button
-          onClick={() => setDetailsExpanded(!detailsExpanded)}
+          onClick={() => {
+            setDetailsExpanded(!detailsExpanded);
+            setUserToggled(true);
+          }}
           className="w-full py-2.5 text-sm text-stone-600 hover:text-stone-900 hover:bg-stone-50 rounded-lg border border-stone-200 transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
           aria-expanded={detailsExpanded}
           aria-controls="entity-report-details"
@@ -167,7 +182,15 @@ export function EntityReport({
       )}
 
       {/* Detailed sections — collapsible when the AI overview is available */}
-      <div id="entity-report-details" className="grid-expand" aria-hidden={!detailsExpanded}>
+      {/* `inert` makes the subtree both invisible to assistive tech and
+          unfocusable by keyboard — the correct pattern for collapsed content
+          containing focusable descendants (aria-hidden alone would still
+          allow tab focus, which is a WCAG failure). */}
+      <div
+        id="entity-report-details"
+        className="grid-expand"
+        inert={!detailsExpanded}
+      >
         <div>
           <div className="space-y-6">
             {/* Intelligence Summary */}

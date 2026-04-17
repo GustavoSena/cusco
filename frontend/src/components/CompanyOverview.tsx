@@ -122,6 +122,17 @@ export function CompanyOverview({ report, loading }: Props) {
         </div>
       )}
 
+      {/* If the stream failed after some chunks arrived, surface the partial
+          state so users know the narrative is incomplete. */}
+      {errorMessage && narrative && (
+        <p
+          role="status"
+          className="mt-3 text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded px-2.5 py-1.5"
+        >
+          Generation interrupted — showing partial summary.
+        </p>
+      )}
+
       {narrative && !streaming && (
         <p className="mt-4 text-xs text-stone-500 border-t border-stone-100 pt-3">
           AI-generated summary from aggregated public data. May contain

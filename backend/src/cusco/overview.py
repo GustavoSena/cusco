@@ -57,9 +57,15 @@ Report data:
 
 
 def truncate_report_for_llm(report: EntityReport) -> dict:
-    """Shared truncation helper. Keeps the LLM context predictable by capping
-    contract list size and Iberinform content. Drops transient fields that
-    don't affect either a narrative or Q&A (queried_at, source_statuses)."""
+    """Prepare an EntityReport for LLM consumption.
+
+    - Caps the contracts list at MAX_CONTRACTS_IN_CONTEXT, adding a _note
+      with the true total so the model can still answer aggregate questions.
+    - Truncates oversized iberinform_content to MAX_IBERINFORM_CHARS.
+    - Drops transient fields (queried_at, source_statuses) — they're request
+      metadata, not company data, and they're noise for both narrative and
+      Q&A contexts.
+    """
     data = report.model_dump(mode="json")
 
     if len(data.get("contracts", [])) > MAX_CONTRACTS_IN_CONTEXT:
@@ -77,14 +83,15 @@ def truncate_report_for_llm(report: EntityReport) -> dict:
                 content[:MAX_IBERINFORM_CHARS] + "\n...(truncated)"
             )
 
+    # Strip transient fields — they're noise for LLM context
+    data.pop("queried_at", None)
+    data.pop("source_statuses", None)
+
     return data
 
 
 def build_overview_prompt(report: EntityReport) -> str:
     data = truncate_report_for_llm(report)
-    # Overview narrative doesn't need per-source status or timestamp
-    data.pop("queried_at", None)
-    data.pop("source_statuses", None)
     report_json = json.dumps(data, ensure_ascii=False, indent=2, default=str)
     return OVERVIEW_SYSTEM_PROMPT.format(nif=report.nif, report_json=report_json)
 
@@ -130,11 +137,30 @@ def get_cached_overview(nif: str, report_hash: str) -> str | None:
     return narrative
 
 
+def _cleanup_expired_cache() -> None:
+    """Remove overview cache files older than the TTL. Best-effort — any
+    error is logged and swallowed so cleanup never breaks a request."""
+    if not OVERVIEW_CACHE_DIR.exists():
+        return
+    cutoff = time.time() - CACHE_MAX_AGE_SECONDS
+    try:
+        for path in OVERVIEW_CACHE_DIR.glob("*.json"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+            except OSError:
+                continue
+    except OSError as e:
+        logger.warning(f"Failed to cleanup overview cache: {e}")
+
+
 def save_cached_overview(nif: str, report_hash: str, narrative: str) -> None:
     """Persist narrative atomically: write to temp file, rename into place.
-    Prevents corrupt JSON if the server is killed mid-write."""
+    Prevents corrupt JSON if the server is killed mid-write. Also lazily
+    evicts expired cache entries."""
     try:
         OVERVIEW_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _cleanup_expired_cache()
         payload = {
             "hash": report_hash,
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -189,7 +215,8 @@ async def stream_overview(report: EntityReport) -> AsyncGenerator[str, None]:
 
     report_hash = _hash_report_for_cache(report)
 
-    cached = get_cached_overview(report.nif, report_hash)
+    # Offload blocking disk I/O to a thread so we don't stall the event loop
+    cached = await asyncio.to_thread(get_cached_overview, report.nif, report_hash)
     if cached is not None:
         async for chunk in _stream_cached(cached):
             yield chunk
@@ -228,6 +255,8 @@ async def stream_overview(report: EntityReport) -> AsyncGenerator[str, None]:
 
     narrative = "".join(collected).strip()
     if narrative:
-        save_cached_overview(report.nif, report_hash, narrative)
+        await asyncio.to_thread(
+            save_cached_overview, report.nif, report_hash, narrative
+        )
 
     yield _sse_event("done")
