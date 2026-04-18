@@ -102,6 +102,7 @@ export default function App() {
               report={report}
               loading={loading}
               aiOverviewAvailable={aiOverviewAvailable}
+              onSelectNif={handleSearchNif}
             />
             {!loading && (
               <ChatPanel

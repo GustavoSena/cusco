@@ -7,6 +7,8 @@ from .gleif import GleifSource
 from .seg_social import SegSocialSource
 from .iberinform import IberinformSource
 from .adc import AdCSource
+from .prr import PRRSource
+from .pt2030 import PT2030Source
 
 __all__ = [
     "NifSource",
@@ -18,4 +20,6 @@ __all__ = [
     "SegSocialSource",
     "IberinformSource",
     "AdCSource",
+    "PRRSource",
+    "PT2030Source",
 ]

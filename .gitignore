@@ -12,3 +12,8 @@ __pycache__/
 /backend/src/cusco.egg-info/
 .playwright-mcp/
 .claude/
+# Agent working memory (machine-local, not shared)
+.claude/context/
+
+# Implementation plans (machine-local, not shared)
+.claude/plans/
