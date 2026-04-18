@@ -156,6 +156,20 @@ class AdCProcess(BaseModel):
     pdf_url: str = ""
 
 
+class MunicipalityContract(BaseModel):
+    """Aggregated contract activity between a company and a municipality.
+
+    Derived from IMPIC contract data — for a given supplier, we bucket their
+    contracts by the contracting municipal entity (Município/Câmara Municipal)
+    and sum the values.
+    """
+
+    nif: str = ""
+    name: str = ""
+    contract_count: int = 0
+    total_value: float = 0.0
+
+
 class PRRFunding(BaseModel):
     """PRR (Plano de Recuperação e Resiliência) funding record for an entity."""
 
@@ -256,6 +270,7 @@ class EntityReport(BaseModel):
     pt2030_total_fund_approved: float = 0.0
     pt2030_total_fund_paid: float = 0.0
     corporate_group: CorporateGroup | None = None
+    municipality_contracts: list[MunicipalityContract] = Field(default_factory=list)
     source_statuses: list[SourceResult] = Field(default_factory=list)
     queried_at: datetime = Field(default_factory=datetime.utcnow)
 

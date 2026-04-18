@@ -9,6 +9,7 @@ import { IntelligenceSummary } from "./IntelligenceSummary";
 import { CompanyOverview } from "./CompanyOverview";
 import { CorporateGroupCard } from "./CorporateGroupCard";
 import { EUFundingCard } from "./EUFundingCard";
+import { MunicipalitiesCard } from "./MunicipalitiesCard";
 import { StreamSection, SkeletonHalfCard, SkeletonCard } from "./Skeleton";
 
 interface Props {
@@ -281,6 +282,17 @@ export function EntityReport({
               <ContractsList
                 contracts={report.contracts}
                 totalValue={report.contracts_total_value}
+              />
+            </StreamSection>
+
+            {/* Municipalities — derived from contracts as supplier */}
+            <StreamSection
+              source="contracts"
+              report={report}
+              skeleton={<SkeletonCard lines={4} />}
+            >
+              <MunicipalitiesCard
+                municipalities={report.municipality_contracts ?? []}
               />
             </StreamSection>
           </div>

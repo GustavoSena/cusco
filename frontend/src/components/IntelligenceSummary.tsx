@@ -105,6 +105,16 @@ function buildFindings(report: EntityReport): Finding[] {
     }
   }
 
+  // Municipality contracts — only count as a finding if the company has
+  // non-trivial exposure (contracts with multiple municipalities).
+  const muniCount = report.municipality_contracts?.length ?? 0;
+  if (muniCount >= 3 && isSourceDone(report, "contracts")) {
+    findings.push({
+      type: "info",
+      label: `Contracts with ${muniCount} municipalit${muniCount !== 1 ? "ies" : "y"}`,
+    });
+  }
+
   return findings;
 }
 

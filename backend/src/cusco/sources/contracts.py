@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import re
 import time
 import zipfile
 from pathlib import Path
@@ -292,7 +293,102 @@ class ContractsSource(DataSource):
 
         total_value = sum(c.contract_price or 0 for c in all_contracts)
 
+        # Municipality aggregation: for contracts where this NIF was the
+        # supplier (adjudicatário), bucket by the contracting municipality
+        # so the UI can show "who this company sells to in the public sector".
+        municipalities = self._aggregate_municipalities(as_supplier, nif)
+
         return {
             "contracts": all_contracts,
             "contracts_total_value": total_value,
+            "municipality_contracts": municipalities,
         }
+
+    # Strict municipality pattern: entry must START with "Município de " or
+    # "Câmara Municipal de " (or "do"/"da"/"dos"/"das") right after the NIF
+    # separator. This excludes "Serviços Intermunicipalizados", "Águas do
+    # Município de X" (intermunicipal service companies), and other
+    # inter-municipal entities that aren't city halls proper.
+    _MUNICIPALITY_PATTERN = re.compile(
+        r"^(\d{9})\s*-\s*"
+        r"((?:Município|Câmara Municipal)\s+(?:de|do|da|dos|das)\s+.+?)"
+        r"\s*$",
+        re.IGNORECASE,
+    )
+
+    @staticmethod
+    def _price_of(raw: dict) -> float:
+        """Parse a contract's price, matching _to_contract's normalization."""
+        for key in ("precoContratual", "contract_price", "precoEfetivo"):
+            v = raw.get(key)
+            if v in (None, ""):
+                continue
+            try:
+                return float(str(v).replace(",", ".").replace(" ", ""))
+            except (ValueError, TypeError):
+                continue
+        return 0.0
+
+    def _aggregate_municipalities(
+        self, contracts_as_supplier: list[dict], supplier_nif: str
+    ) -> list[dict]:
+        """Bucket a supplier's contracts by the contracting municipality.
+
+        A municipality is identified by `_MUNICIPALITY_PATTERN` — which
+        requires the contracting entity string to start with "Município de X"
+        or "Câmara Municipal de X" right after the leading NIF. This excludes
+        inter-municipal service companies and similar entities that happen to
+        contain "Municipal" in their name.
+
+        Returns a list of {nif, name, contract_count, total_value} dicts
+        sorted by total_value descending.
+        """
+        buckets: dict[str, dict[str, Any]] = {}
+        seen_ids: set[str] = set()
+
+        for raw in contracts_as_supplier:
+            cid = str(raw.get("idcontrato") or raw.get("id") or "")
+            if cid and cid in seen_ids:
+                continue
+            if cid:
+                seen_ids.add(cid)
+
+            # adjudicante is a list of "NIF - Name" strings in IMPIC format
+            adjudicantes = raw.get("adjudicante") or []
+            if not isinstance(adjudicantes, list):
+                adjudicantes = [adjudicantes]
+
+            price = self._price_of(raw)
+
+            for entry in adjudicantes:
+                entry_str = str(entry).strip()
+                # Skip self-contracts (supplier = contracting entity)
+                if entry_str.startswith(supplier_nif):
+                    continue
+
+                m = self._MUNICIPALITY_PATTERN.match(entry_str)
+                if not m:
+                    continue
+
+                muni_nif = m.group(1)
+                muni_name = m.group(2).strip()
+
+                bucket = buckets.setdefault(
+                    muni_nif,
+                    {
+                        "nif": muni_nif,
+                        "name": muni_name,
+                        "contract_count": 0,
+                        "total_value": 0.0,
+                    },
+                )
+                bucket["contract_count"] += 1
+                bucket["total_value"] += price
+
+        # Sort by total value desc
+        out = sorted(
+            buckets.values(),
+            key=lambda b: b["total_value"],
+            reverse=True,
+        )
+        return out

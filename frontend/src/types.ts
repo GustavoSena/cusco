@@ -143,6 +143,13 @@ export interface CorporateGroup {
   has_more_children: boolean;
 }
 
+export interface MunicipalityContract {
+  nif: string;
+  name: string;
+  contract_count: number;
+  total_value: number;
+}
+
 export interface AdCProcess {
   process_number: string;
   process_type: string;
@@ -198,6 +205,7 @@ export interface EntityReport {
   pt2030_total_fund_approved: number;
   pt2030_total_fund_paid: number;
   corporate_group: CorporateGroup | null;
+  municipality_contracts: MunicipalityContract[];
   source_statuses: SourceResult[];
   queried_at: string;
 }

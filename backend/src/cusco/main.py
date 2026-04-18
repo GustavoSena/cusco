@@ -157,6 +157,13 @@ def _apply_source_data(report: EntityReport, source_name: str, data: dict | None
     if "contracts" in data:
         report.contracts = data["contracts"]
         report.contracts_total_value = data.get("contracts_total_value", 0)
+    if "municipality_contracts" in data:
+        from .models import MunicipalityContract
+
+        report.municipality_contracts = [
+            MunicipalityContract(**m) if isinstance(m, dict) else m
+            for m in data["municipality_contracts"]
+        ]
     if "insolvency_proceedings" in data:
         report.insolvency_proceedings = data["insolvency_proceedings"]
         report.has_insolvency = data.get("has_insolvency", False)
