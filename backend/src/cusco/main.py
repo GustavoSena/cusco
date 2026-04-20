@@ -76,8 +76,17 @@ async def lifespan(app: FastAPI):
         for t in bg_tasks:
             try:
                 await t
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
+                # Expected — we just called cancel(). Stay quiet.
                 pass
+            except Exception as e:  # noqa: BLE001
+                # Anything else is a real failure that happened to surface
+                # during shutdown (e.g. I/O error flushing SQLite). Don't
+                # re-raise — we're shutting down anyway — but do log it so
+                # postmortems aren't staring at a silent process exit.
+                logger.warning(
+                    f"Background task {t.get_name()} raised on shutdown: {e}"
+                )
 
 
 async def _bg_load_contracts():

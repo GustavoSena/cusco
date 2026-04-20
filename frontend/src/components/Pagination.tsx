@@ -21,11 +21,18 @@ export function Pagination({
   onPageChange,
   label = "Pagination",
 }: Props) {
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  if (totalItems <= 0) return null;
+  // Defensive: clamp pageSize and page against stale/invalid inputs so the
+  // rendered labels never lie. The click handlers already clamp when
+  // firing, but a parent passing page=99 after shrinking the dataset
+  // would otherwise render "496–8 of 8" until the next render cycle.
+  const safePageSize = Math.max(1, pageSize);
+  const totalPages = Math.max(1, Math.ceil(totalItems / safePageSize));
   if (totalPages <= 1) return null;
 
-  const start = page * pageSize + 1;
-  const end = Math.min(totalItems, (page + 1) * pageSize);
+  const currentPage = Math.min(Math.max(0, page), totalPages - 1);
+  const start = currentPage * safePageSize + 1;
+  const end = Math.min(totalItems, (currentPage + 1) * safePageSize);
 
   return (
     <nav
@@ -40,20 +47,20 @@ export function Pagination({
         <button
           type="button"
           aria-label="Previous page"
-          onClick={() => onPageChange(Math.max(0, page - 1))}
-          disabled={page === 0}
+          onClick={() => onPageChange(Math.max(0, currentPage - 1))}
+          disabled={currentPage === 0}
           className="px-2 py-1 rounded border border-stone-200 text-stone-600 hover:bg-stone-50 hover:border-stone-300 disabled:opacity-40 disabled:hover:bg-white disabled:hover:border-stone-200 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1"
         >
           ←
         </button>
         <span className="tabular-nums px-2" aria-live="polite">
-          {page + 1} / {totalPages}
+          {currentPage + 1} / {totalPages}
         </span>
         <button
           type="button"
           aria-label="Next page"
-          onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
-          disabled={page >= totalPages - 1}
+          onClick={() => onPageChange(Math.min(totalPages - 1, currentPage + 1))}
+          disabled={currentPage >= totalPages - 1}
           className="px-2 py-1 rounded border border-stone-200 text-stone-600 hover:bg-stone-50 hover:border-stone-300 disabled:opacity-40 disabled:hover:bg-white disabled:hover:border-stone-200 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1"
         >
           →

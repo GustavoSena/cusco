@@ -74,10 +74,15 @@ class PT2030Source(DataSource):
         try:
             rows = await self._load_rows()
             self._index(rows)
-        except Exception as e:
-            logger.warning(f"Failed to load PT2030 entidades: {e}")
-        self._loaded = True
-        logger.info(f"Indexed PT2030: {len(self._by_nif)} NIFs")
+            self._loaded = True
+            logger.info(f"Indexed PT2030: {len(self._by_nif)} NIFs")
+        except Exception as e:  # noqa: BLE001
+            # Leave `_loaded=False` so `_load_once` can retry on the next
+            # query — otherwise a transient DNS/network blip here turns
+            # into "PT2030 silently empty until the process restarts."
+            logger.warning(
+                f"Failed to load PT2030 entidades (will retry on next query): {e}"
+            )
     def _read_cache(self, path: Path) -> list[dict] | None:
         """Read a cached JSON file. Returns None if missing, corrupt, or
         unreadable — caller should re-download in that case."""

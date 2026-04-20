@@ -75,17 +75,39 @@ class ContractsSource(DataSource):
             except Exception as e:
                 logger.warning(f"Failed to load contracts for {year}: {e}")
 
+        # Each `replace_all` is its own transaction, so if we naively
+        # catch `Exception` around both we can leave supplier fresh while
+        # entity holds yesterday's rows — and `_loaded=True` would mask
+        # the skew across `search_by_nif` joins. Track them individually;
+        # only flip `_loaded` when both succeed so the next query retries.
+        supplier_ok = True
+        entity_ok = True
         try:
             await asyncio.to_thread(self._supplier_table.replace_all, supplier_rows)
+        except Exception as e:  # noqa: BLE001
+            supplier_ok = False
+            logger.warning(f"Failed to persist supplier contracts to SQLite: {e}")
+        try:
             await asyncio.to_thread(self._entity_table.replace_all, entity_rows)
-        except Exception as e:
-            logger.warning(f"Failed to persist contracts to SQLite: {e}")
+        except Exception as e:  # noqa: BLE001
+            entity_ok = False
+            logger.warning(f"Failed to persist entity contracts to SQLite: {e}")
 
-        self._loaded = True
-        logger.info(
-            f"Indexed contracts: {len(supplier_rows)} supplier entries, "
-            f"{len(entity_rows)} entity entries"
-        )
+        if supplier_ok and entity_ok:
+            self._loaded = True
+            logger.info(
+                f"Indexed contracts: {len(supplier_rows)} supplier entries, "
+                f"{len(entity_rows)} entity entries"
+            )
+        else:
+            # `is_fresh` on the failed table will still report False on the
+            # next attempt (no `_meta` row committed), so `_do_load` will
+            # naturally rebuild both sides next time — no manual reset needed.
+            logger.warning(
+                "Contracts load incomplete "
+                f"(supplier={supplier_ok}, entity={entity_ok}) — "
+                "will retry on next query"
+            )
 
     async def _load_year(self, year: int) -> list[dict]:
         """Download and parse contract data for a given year.

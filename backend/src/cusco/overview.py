@@ -43,6 +43,14 @@ CACHE_MAX_AGE_SECONDS = 30 * 24 * 3600
 # every single record. Keeping this small controls prompt size and cost.
 MAX_CONTRACTS_IN_CONTEXT = 100
 MAX_IBERINFORM_CHARS = 4000
+# Cap other list fields too. A large municipality can have thousands of
+# `municipality_contracts` buckets, and a PRR beneficiary can have hundreds
+# of funding/contract rows — without caps, a single pathological NIF could
+# balloon the prompt well past a reasonable context budget.
+MAX_MUNICIPALITY_CONTRACTS_IN_CONTEXT = 50
+MAX_PRR_ROWS_IN_CONTEXT = 50
+MAX_ADC_PROCESSES_IN_CONTEXT = 50
+MAX_SEG_SOCIAL_PROCEDURES_IN_CONTEXT = 50
 
 
 # Accept only 9-digit NIFs (matches the /api/search validation). Used to
@@ -102,14 +110,32 @@ def truncate_report_for_llm(report: EntityReport) -> dict:
       Q&A contexts.
     """
     data = report.model_dump(mode="json")
+    notes: list[str] = []
 
-    if len(data.get("contracts", [])) > MAX_CONTRACTS_IN_CONTEXT:
-        total = len(data["contracts"])
-        data["contracts"] = data["contracts"][:MAX_CONTRACTS_IN_CONTEXT]
-        data["_note"] = (
-            f"Showing {MAX_CONTRACTS_IN_CONTEXT} of {total} contracts. "
-            f"Total contract value across all {total}: {report.contracts_total_value}"
-        )
+    def _truncate_list(field: str, cap: int, label: str) -> None:
+        """Truncate `data[field]` to `cap` items and add a _note entry
+        recording the original total, so the model can still reason
+        about aggregates even though the sample is partial."""
+        items = data.get(field) or []
+        if len(items) > cap:
+            total = len(items)
+            data[field] = items[:cap]
+            notes.append(f"Showing {cap} of {total} {label}.")
+
+    _truncate_list("contracts", MAX_CONTRACTS_IN_CONTEXT, "contracts")
+    _truncate_list(
+        "municipality_contracts",
+        MAX_MUNICIPALITY_CONTRACTS_IN_CONTEXT,
+        "municipality-contract buckets",
+    )
+    _truncate_list("prr_fundings", MAX_PRR_ROWS_IN_CONTEXT, "PRR fundings")
+    _truncate_list("prr_contracts", MAX_PRR_ROWS_IN_CONTEXT, "PRR contracts")
+    _truncate_list("adc_processes", MAX_ADC_PROCESSES_IN_CONTEXT, "AdC processes")
+    _truncate_list(
+        "seg_social_procedures",
+        MAX_SEG_SOCIAL_PROCEDURES_IN_CONTEXT,
+        "seg-social procedures",
+    )
 
     if data.get("iberinform_content"):
         content = data["iberinform_content"]
@@ -117,6 +143,15 @@ def truncate_report_for_llm(report: EntityReport) -> dict:
             data["iberinform_content"] = (
                 content[:MAX_IBERINFORM_CHARS] + "\n...(truncated)"
             )
+
+    if notes:
+        # Include the aggregate contract value explicitly so the LLM
+        # can still cite it even though the contracts list was sampled.
+        notes.append(
+            f"Total contract value across all contracts: "
+            f"{report.contracts_total_value}"
+        )
+        data["_note"] = " ".join(notes)
 
     # Strip transient fields — they're noise for LLM context
     data.pop("queried_at", None)
@@ -296,7 +331,10 @@ async def stream_overview(report: EntityReport) -> AsyncGenerator[str, None]:
         yield _sse_event("done")
         return
     except openai.APIError as e:
-        yield _sse_event("error", message=str(e.message))
+        # `APIError.message` isn't present on every subclass and can be
+        # None — `str(e)` works uniformly and won't raise inside the
+        # handler (which would otherwise break the SSE stream).
+        yield _sse_event("error", message=str(e))
         yield _sse_event("done")
         return
 

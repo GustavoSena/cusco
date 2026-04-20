@@ -27,10 +27,17 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 from typing import Iterable
+
+# Table names are hardcoded today but `_ensure_schema` interpolates them
+# into `CREATE TABLE` DDL. Validate eagerly in __init__ so a future
+# refactor that feeds user input here can't become a SQL injection.
+_TABLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +63,17 @@ def get_connection() -> sqlite3.Connection:
     # WAL for reader/writer concurrency (we're single-writer but many readers)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA foreign_keys=ON")
+    # `timeout=30.0` above guards lock acquisition on connect; this covers
+    # in-transaction SQLITE_BUSY (a reader landing mid-replace_all).
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
+
+
+def _escape_like(query: str) -> str:
+    """Escape SQL LIKE metacharacters (``%``, ``_``, ``\\``) so a user
+    searching for ``50%`` gets literal matches, not a wildcard hunt.
+    Pair with ``ESCAPE '\\'`` in the query."""
+    return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _ensure_meta(conn: sqlite3.Connection) -> None:
@@ -98,12 +114,20 @@ class BulkTable:
     """
 
     def __init__(self, name: str):
+        if not _TABLE_NAME_RE.match(name):
+            # Defence-in-depth: identifiers can't be bound as parameters in
+            # sqlite3, so `_ensure_schema` interpolates `self.name`
+            # directly. All current call sites pass hardcoded constants,
+            # but this assertion makes sure a future refactor that
+            # accidentally pipes user input here crashes loudly instead
+            # of enabling SQL injection via crafted table names.
+            raise ValueError(f"Invalid SQLite table name: {name!r}")
         self.name = name
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
-        # Identifiers quoted defensively — our table names are hard-coded
-        # constants, but quoting lets us reserve the option of dynamic
-        # names without re-auditing for injection.
+        # Identifiers quoted defensively — table names are validated in
+        # __init__, but quoting guards against SQLite keyword collisions
+        # for any future additions.
         conn.execute(
             f'CREATE TABLE IF NOT EXISTS "{self.name}" ('
             "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -119,7 +143,7 @@ class BulkTable:
     def is_fresh(self, max_age_seconds: float) -> bool:
         """True if the table has been loaded within max_age_seconds."""
         try:
-            with get_connection() as conn:
+            with closing(get_connection()) as conn:
                 self._ensure_schema(conn)
                 cur = conn.execute(
                     "SELECT loaded_at FROM _meta WHERE name = ?", (self.name,)
@@ -134,7 +158,7 @@ class BulkTable:
 
     def row_count(self) -> int:
         try:
-            with get_connection() as conn:
+            with closing(get_connection()) as conn:
                 self._ensure_schema(conn)
                 cur = conn.execute(
                     "SELECT row_count FROM _meta WHERE name = ?", (self.name,)
@@ -153,7 +177,7 @@ class BulkTable:
         an inconsistent state.
         """
         count = 0
-        with get_connection() as conn:
+        with closing(get_connection()) as conn:
             self._ensure_schema(conn)
             conn.execute("BEGIN")
             try:
@@ -183,9 +207,17 @@ class BulkTable:
         return count
 
     def get_by_nif(self, nif: str) -> list[dict]:
-        """Look up all payloads for a given NIF. Returns [] on any error."""
+        """Look up all payloads for a given NIF. Returns [] on any error.
+
+        `_ensure_schema` is called here too so a query that lands before
+        any `replace_all` has run (e.g. a cold DB wiped out of band)
+        doesn't fall through to an `OperationalError: no such table`
+        that gets silently swallowed as "0 hits". With the schema
+        guaranteed, a bare `[]` means "NIF truly not in dataset."
+        """
         try:
-            with get_connection() as conn:
+            with closing(get_connection()) as conn:
+                self._ensure_schema(conn)
                 cur = conn.execute(
                     f'SELECT payload FROM "{self.name}" WHERE nif = ?', (nif,)
                 )
@@ -206,6 +238,8 @@ class NameIndexTable:
     """
 
     def __init__(self, name: str):
+        if not _TABLE_NAME_RE.match(name):
+            raise ValueError(f"Invalid SQLite table name: {name!r}")
         self.name = name
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
@@ -224,7 +258,7 @@ class NameIndexTable:
     def is_fresh(self, max_age_seconds: float) -> bool:
         """True if the table has been loaded within max_age_seconds."""
         try:
-            with get_connection() as conn:
+            with closing(get_connection()) as conn:
                 self._ensure_schema(conn)
                 cur = conn.execute(
                     "SELECT loaded_at FROM _meta WHERE name = ?", (self.name,)
@@ -240,7 +274,7 @@ class NameIndexTable:
     def replace_all(self, rows: Iterable[tuple[str, str]]) -> int:
         """Wipe + reinsert (name_lower, nif) pairs in a single transaction."""
         count = 0
-        with get_connection() as conn:
+        with closing(get_connection()) as conn:
             self._ensure_schema(conn)
             conn.execute("BEGIN")
             try:
@@ -273,7 +307,8 @@ class NameIndexTable:
         if not q:
             return []
         try:
-            with get_connection() as conn:
+            with closing(get_connection()) as conn:
+                self._ensure_schema(conn)
                 # Exact hits first
                 exact = [
                     row["nif"]
@@ -287,12 +322,15 @@ class NameIndexTable:
                     return exact[:limit]
 
                 remaining = limit - len(exact)
-                like = f"%{q}%"
+                # Escape `%`/`_`/`\` so a user searching for "50%" or
+                # "foo_bar" gets literal matches, not wildcard hunts.
+                like = f"%{_escape_like(q)}%"
                 partial = [
                     row["nif"]
                     for row in conn.execute(
                         f'SELECT DISTINCT nif FROM "{self.name}" '
-                        "WHERE name_lower LIKE ? AND name_lower != ? LIMIT ?",
+                        "WHERE name_lower LIKE ? ESCAPE '\\' "
+                        "AND name_lower != ? LIMIT ?",
                         (like, q, remaining),
                     )
                 ]

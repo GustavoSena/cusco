@@ -105,6 +105,13 @@ class PRRSource(DataSource):
             self._loaded = True
             return
 
+        # Track whether either side refused the new payload (empty
+        # download, parse failure with 0 usable rows) — don't flip
+        # `_loaded=True` if we failed to refresh a stale table, so the
+        # next query gets another shot.
+        fundings_refreshed = fundings_fresh
+        contracts_refreshed = contracts_fresh
+
         if not fundings_fresh:
             try:
                 fundings = await self._load_fundings()
@@ -113,8 +120,19 @@ class PRRSource(DataSource):
                     for row in fundings
                     if (nif := _normalize_nif(row.get("nif_entidade")))
                 ]
-                await asyncio.to_thread(self._fundings_table.replace_all, rows)
-            except Exception as e:
+                if rows:
+                    await asyncio.to_thread(
+                        self._fundings_table.replace_all, rows
+                    )
+                    fundings_refreshed = True
+                else:
+                    # Keep yesterday's cache rather than wiping to zero
+                    # when upstream went AWOL.
+                    logger.warning(
+                        "PRR entidades returned 0 usable rows — "
+                        "keeping previous cache"
+                    )
+            except Exception as e:  # noqa: BLE001
                 logger.warning(f"Failed to load PRR entidades: {e}")
 
         if not contracts_fresh:
@@ -125,16 +143,31 @@ class PRRSource(DataSource):
                     for row in contracts
                     if (nif := _normalize_nif(row.get("cd_entidade")))
                 ]
-                await asyncio.to_thread(self._contracts_table.replace_all, rows)
-            except Exception as e:
+                if rows:
+                    await asyncio.to_thread(
+                        self._contracts_table.replace_all, rows
+                    )
+                    contracts_refreshed = True
+                else:
+                    logger.warning(
+                        "PRR contratos returned 0 usable rows — "
+                        "keeping previous cache"
+                    )
+            except Exception as e:  # noqa: BLE001
                 logger.warning(f"Failed to load PRR contratos: {e}")
 
-        self._loaded = True
-        f_count = await asyncio.to_thread(self._fundings_table.row_count)
-        c_count = await asyncio.to_thread(self._contracts_table.row_count)
-        logger.info(
-            f"Indexed PRR: {f_count} funding rows, {c_count} contract rows"
-        )
+        if fundings_refreshed and contracts_refreshed:
+            self._loaded = True
+            f_count = await asyncio.to_thread(self._fundings_table.row_count)
+            c_count = await asyncio.to_thread(self._contracts_table.row_count)
+            logger.info(
+                f"Indexed PRR: {f_count} funding rows, {c_count} contract rows"
+            )
+        else:
+            logger.warning(
+                f"PRR load incomplete (fundings={fundings_refreshed}, "
+                f"contracts={contracts_refreshed}) — will retry on next query"
+            )
 
     # -- Dataset A: Entidades ----------------------------------------------
     async def _load_fundings(self) -> list[dict]:
@@ -184,36 +217,54 @@ class PRRSource(DataSource):
         from openpyxl import load_workbook
 
         wb = load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
-        ws = wb.active
-        if ws is None:
-            return []
-
-        rows_iter = ws.iter_rows(values_only=True)
         try:
-            headers = [str(h).strip() if h is not None else "" for h in next(rows_iter)]
-        except StopIteration:
-            return []
+            ws = wb.active
+            if ws is None:
+                return []
 
-        # Precompute which column indexes we need, skipping everything else
-        keep_idx = [
-            (idx, header)
-            for idx, header in enumerate(headers)
-            if header in keep_columns
-        ]
+            rows_iter = ws.iter_rows(values_only=True)
+            try:
+                headers = [
+                    str(h).strip() if h is not None else "" for h in next(rows_iter)
+                ]
+            except StopIteration:
+                return []
 
-        out: list[dict] = []
-        for row in rows_iter:
-            if row is None:
-                continue
-            record = {}
-            for idx, header in keep_idx:
-                raw_val = row[idx] if idx < len(row) else None
-                record[header] = _json_safe(raw_val)
-            if any(v not in (None, "") for v in record.values()):
-                out.append(record)
+            # Case-insensitive header matching. If dados.gov.pt ever
+            # publishes a revision with `NIF_Entidade` (vs. the current
+            # all-lowercase `nif_entidade`), a strict comparison would
+            # silently drop every column — every row would then look
+            # "empty", we'd persist 0 rows, and the log would look
+            # perfectly healthy. Normalize on both sides and preserve
+            # the canonical (frozenset) casing as the output key.
+            keep_lookup = {c.lower(): c for c in keep_columns}
+            keep_idx = [
+                (idx, keep_lookup[header.lower()])
+                for idx, header in enumerate(headers)
+                if header.lower() in keep_lookup
+            ]
+            if not keep_idx:
+                logger.warning(
+                    f"PRR XLSX headers did not match any expected columns "
+                    f"(got {headers[:8]}…); persisted 0 rows"
+                )
+                return []
 
-        wb.close()
-        return out
+            out: list[dict] = []
+            for row in rows_iter:
+                if row is None:
+                    continue
+                record = {}
+                for idx, header in keep_idx:
+                    raw_val = row[idx] if idx < len(row) else None
+                    record[header] = _json_safe(raw_val)
+                if any(v not in (None, "") for v in record.values()):
+                    out.append(record)
+            return out
+        finally:
+            # `wb.close()` used to be on the happy path only — a parse
+            # error above would leak the open workbook's file handle.
+            wb.close()
 
     def _parse_prr_entidades_xlsx(self, xlsx_bytes: bytes) -> list[dict]:
         return self._parse_xlsx_rows(xlsx_bytes, self._ENTIDADES_COLUMNS)

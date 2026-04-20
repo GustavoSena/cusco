@@ -38,12 +38,24 @@ export function ContractsList({ contracts, totalValue }: Props) {
     setPage(0);
   };
 
-  // Reset to first page when sort order or the dataset itself changes
+  // Reset to first page when sort order or the dataset itself changes.
+  // Depending on `contracts` identity (not just `.length`) catches the
+  // case where the user switches to a different company that happens
+  // to have the same number of contracts — same length, completely
+  // different rows.
   useEffect(() => {
     setPage(0);
-  }, [sortBy, sortDesc, contracts.length]);
+  }, [sortBy, sortDesc, contracts]);
 
-  const visible = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  // Clamp against the current dataset on render too, so a brief window
+  // where `page` hasn't been reset yet doesn't slice an out-of-range
+  // page (would render blank).
+  const totalPages = Math.max(1, Math.ceil(contracts.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const visible = sorted.slice(
+    currentPage * PAGE_SIZE,
+    (currentPage + 1) * PAGE_SIZE,
+  );
 
   return (
     <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6">
@@ -115,7 +127,7 @@ export function ContractsList({ contracts, totalValue }: Props) {
             </tbody>
           </table>
           <Pagination
-            page={page}
+            page={currentPage}
             pageSize={PAGE_SIZE}
             totalItems={contracts.length}
             onPageChange={setPage}

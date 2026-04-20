@@ -99,14 +99,23 @@ export function CorporateGroupCard({ group, onSelectNif }: Props) {
   const children = group.children ?? [];
   const [page, setPage] = useState(0);
 
-  // Reset pagination when the underlying group changes (different NIF)
+  // Reset pagination when the children array identity changes — a
+  // different NIF with the same child count would otherwise leave
+  // the user on a stale page index.
   useEffect(() => {
     setPage(0);
-  }, [children.length]);
+  }, [children]);
 
   if (!group.parent && children.length === 0) return null;
 
-  const visible = children.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  // Clamp against the current length on render so an out-of-range
+  // page (from an unrelated parent re-render) doesn't slice into nothing.
+  const totalPages = Math.max(1, Math.ceil(children.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const visible = children.slice(
+    currentPage * PAGE_SIZE,
+    (currentPage + 1) * PAGE_SIZE,
+  );
 
   return (
     <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6">
@@ -147,7 +156,7 @@ export function CorporateGroupCard({ group, onSelectNif }: Props) {
               ))}
             </div>
             <Pagination
-              page={page}
+              page={currentPage}
               pageSize={PAGE_SIZE}
               totalItems={children.length}
               onPageChange={setPage}

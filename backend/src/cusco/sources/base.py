@@ -15,9 +15,16 @@ class DataSource(ABC):
     def __init__(self, timeout: float = 30.0):
         self.timeout = timeout
         # Per-instance lock for `_ensure_loaded`-style one-time loading.
+        # Constructed eagerly (rather than lazily inside `_load_once`) so
+        # two coroutines racing to initialize the lock can't end up with
+        # two different Lock instances that don't serialize each other.
+        # Asyncio is single-threaded until the first `await`, so the
+        # lazy pattern happened to be safe — but it's brittle under any
+        # future refactor that adds an `await` between the check and the
+        # assign. Eager construction removes that foot-gun.
         # Subclasses that override `_ensure_loaded` should wrap the body in
-        # `await self._load_once(self._do_load)` (see `_load_once` below).
-        self._load_lock: asyncio.Lock | None = None
+        # `await self._load_once(self._do_load, lambda: self._loaded)`.
+        self._load_lock: asyncio.Lock = asyncio.Lock()
 
     @abstractmethod
     async def search_by_nif(self, nif: str) -> dict[str, Any]:
@@ -57,9 +64,9 @@ class DataSource(ABC):
         """
         if is_loaded():
             return
-        if self._load_lock is None:
-            self._load_lock = asyncio.Lock()
         async with self._load_lock:
+            # Double-check inside the lock: a sibling coroutine may have
+            # finished the load while we were waiting to acquire.
             if is_loaded():
                 return
             await loader()

@@ -70,9 +70,15 @@ class EntitiesSource(DataSource):
         try:
             data = await self._load_entities()
             await self._persist_entities(data)
-        except Exception as e:
-            logger.warning(f"Failed to load IMPIC entities: {e}")
-        self._loaded = True
+            self._loaded = True
+        except Exception as e:  # noqa: BLE001
+            # Don't flip `_loaded=True` on failure: otherwise a transient
+            # network blip at startup would silently serve empty results
+            # for the rest of the process lifetime. `_load_once` will see
+            # the flag still False and let the next query re-enter.
+            logger.warning(
+                f"Failed to load IMPIC entities (will retry on next query): {e}"
+            )
 
     async def _load_entities(self) -> list[dict]:
         # Resolve download URL from the dataset API
@@ -130,6 +136,17 @@ class EntitiesSource(DataSource):
         to `BulkTable.replace_all` / `NameIndexTable.replace_all`. Each
         table is rewritten atomically inside its own transaction.
         """
+        # Refuse to overwrite the tables with an empty payload — if the
+        # upstream download returned nothing (404, malformed JSON, etc.)
+        # yesterday's 110K-entity cache is strictly better than wiping
+        # to zero. The caller already logged the upstream failure.
+        if not entities:
+            logger.warning(
+                "IMPIC entities payload is empty — keeping previous "
+                "cache instead of persisting 0 rows"
+            )
+            return
+
         nif_rows: list[tuple[str, dict]] = []
         name_rows: list[tuple[str, str]] = []
 
@@ -142,12 +159,22 @@ class EntitiesSource(DataSource):
                 if name:
                     name_rows.append((name.lower(), nif))
 
+        if not nif_rows:
+            # Belt-and-braces: even if `entities` was non-empty, it could
+            # be all garbage rows with no NIF. Don't overwrite with those.
+            logger.warning(
+                "IMPIC entities contained no usable NIF rows — "
+                "keeping previous cache"
+            )
+            return
+
         try:
             await asyncio.to_thread(self._table.replace_all, nif_rows)
             await asyncio.to_thread(self._name_index.replace_all, name_rows)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"Failed to persist IMPIC entities to SQLite: {e}")
-            return
+            # Re-raise so the caller's `_loaded=True` stays gated on success.
+            raise
 
         logger.info(
             f"Indexed IMPIC entities: {len(nif_rows)} by NIF, "
