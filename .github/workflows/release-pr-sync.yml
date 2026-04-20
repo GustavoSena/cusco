@@ -36,6 +36,16 @@ permissions:
   issues: write
   contents: read
 
+# Serialize jobs for this workflow. Without a concurrency group, two PRs
+# merging to `develop` within seconds would spawn two runs in parallel,
+# both reading the same release-PR body and both calling `pulls.update`
+# — last write wins, the earlier run's line silently vanishes from the
+# Included-PRs list. Serialized runs see the first run's update and
+# append on top of it.
+concurrency:
+  group: release-pr-sync
+  cancel-in-progress: false
+
 jobs:
   sync:
     # Only run on actual merges, not on closed-without-merging. Without
@@ -74,22 +84,26 @@ jobs:
             core.info(`Updating release PR #${releasePr.number}`);
 
             // --- 2. Extract issue references from the merged PR body ---
-            // Matches the GitHub-native keywords (closes/fixes/resolves) and
-            // also bare "#123" references in a "Closes" line, so either
-            // "Closes #12" or "Closes #8, #9, #10" both work.
+            // Mirror GitHub's own "auto-close" keyword detection: the keyword
+            // must be at the START of a line (after optional leading list /
+            // quote markers). That avoids false positives like
+            //   > rewrites PR #30 … aggregate all `Closes #N` references
+            // where "Closes" is a meta-reference inside prose or a backtick
+            // span. Previously a permissive regex scanned anywhere in the
+            // body and happily extracted `#30` from the above, silently
+            // adding the release PR to its own Closes line.
+            //
+            // We also explicitly strip markdown inline code (backtick spans)
+            // and blockquote markers before matching, so phrases wrapped
+            // in backticks are never parsed as intent.
             const body = mergedPr.body || '';
             const issueRefs = new Set();
-            // Keyword + #N (one per match)
-            const kwRe = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b[^\n]*?#(\d+)/gi;
-            for (const m of body.matchAll(kwRe)) {
-              issueRefs.add(Number(m[1]));
-            }
-            // Also pick up "Closes #8, #9, #10." style lists — the regex above
-            // only catches the first # after the keyword, so sweep for trailing
-            // comma-separated #N's on any line starting with a closing keyword.
-            for (const line of body.split('\n')) {
-              if (!/^\s*(closes?|fix(?:es)?|resolves?)\b/i.test(line)) continue;
-              for (const m of line.matchAll(/#(\d+)/g)) {
+            const CLOSE_KW = /^[\s>*\-+]*?(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b/i;
+            for (const rawLine of body.split('\n')) {
+              // Drop backtick-wrapped code so `Closes #N` inside prose doesn't count
+              const stripped = rawLine.replace(/`[^`]*`/g, '');
+              if (!CLOSE_KW.test(stripped)) continue;
+              for (const m of stripped.matchAll(/#(\d+)/g)) {
                 issueRefs.add(Number(m[1]));
               }
             }
@@ -145,7 +159,25 @@ jobs:
             }
             let newPrLines = [...existingLines];
             if (!existingPrNumbers.has(mergedPr.number)) {
-              const title = (mergedPr.title || '').replace(/\s+/g, ' ').trim();
+              // Sanitize the PR title before interpolating into markdown.
+              // A malicious/sloppy title could otherwise inject:
+              //   - HTML comments that close the RELEASE_PR sentinels
+              //     early, letting an attacker own the rest of the body
+              //   - `@mentions` that notify every org member
+              //   - Fake "Closes #N" lines that the CLOSES rewrite would
+              //     pick up on the next sync run
+              // The `sanitizeTitle` helper strips `<`, `>`, backticks
+              // (no inline code injection), `@` (no mentions), and caps
+              // length at 160 chars so a runaway title can't bloat the
+              // release body.
+              const sanitizeTitle = (raw) => {
+                const flat = String(raw || '')
+                  .replace(/\s+/g, ' ')
+                  .replace(/[<>`@]/g, '')
+                  .trim();
+                return flat.length > 160 ? flat.slice(0, 157) + '…' : flat;
+              };
+              const title = sanitizeTitle(mergedPr.title);
               newPrLines.push(`- #${mergedPr.number} — ${title}`);
             }
             // Sort by PR number ascending so the list reads chronologically.

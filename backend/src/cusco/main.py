@@ -93,7 +93,7 @@ async def _bg_load_contracts():
     try:
         await contracts_source._ensure_loaded()
         logger.info("Contract data loaded in background.")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - graceful degradation: retry on query
         logger.warning(f"Background contract load failed (will retry on query): {e}")
 
 
@@ -101,7 +101,7 @@ async def _bg_load_entities():
     try:
         await entities_source._ensure_loaded()
         logger.info("IMPIC entity data loaded in background.")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - graceful degradation: retry on query
         logger.warning(f"Background entity load failed (will retry on query): {e}")
 
 
@@ -109,7 +109,7 @@ async def _bg_load_adc():
     try:
         await adc_source._ensure_loaded()
         logger.info("AdC processes loaded in background.")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - graceful degradation: retry on query
         logger.warning(f"Background AdC load failed (will retry on query): {e}")
 
 
@@ -117,7 +117,7 @@ async def _bg_load_prr():
     try:
         await prr_source._ensure_loaded()
         logger.info("PRR data loaded in background.")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - graceful degradation: retry on query
         logger.warning(f"Background PRR load failed (will retry on query): {e}")
 
 
@@ -125,7 +125,7 @@ async def _bg_load_pt2030():
     try:
         await pt2030_source._ensure_loaded()
         logger.info("PT2030 data loaded in background.")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - graceful degradation: retry on query
         logger.warning(f"Background PT2030 load failed (will retry on query): {e}")
 
 
@@ -168,7 +168,7 @@ async def _run_source(name: str, coro) -> tuple[str, dict | None, SourceResult]:
 # Source names in the order they appear in the tasks list
 _SOURCE_NAMES = [
     "nif", "ptdata_company", "citius", "devedores", "contracts",
-    "entities", "gleif", "seg_social", "iberinform",
+    "entities", "gleif", "seg_social", "iberinform", "adc",
     "prr", "pt2030",
 ]
 
@@ -286,7 +286,7 @@ async def _enrich_corporate_group(report: EntityReport) -> None:
 
     try:
         group = await gleif_source.get_corporate_group(lei)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - enrichment is best-effort; don't fail the report
         logger.warning(f"GLEIF corporate group fetch failed for {lei}: {e}")
         return
 
@@ -329,6 +329,12 @@ async def search_entity(
         _run_source("gleif", gleif_source.search_by_nif(nif)),
         _run_source("seg_social", seg_social_source.search_by_nif(nif)),
         _run_source("iberinform", iberinform_source.search_by_nif(nif)),
+        # AdC is included here so its status (ok / error / pending) shows up
+        # in the source-statuses badge row. `search_by_nif` itself returns
+        # an empty process list because the AdC DB is keyed by company
+        # name, not NIF — the actual matching happens in `_enrich_adc`
+        # after `entities`/`gleif`/`ptdata` fill in the company name.
+        _run_source("adc", adc_source.search_by_nif(nif)),
         _run_source("prr", prr_source.search_by_nif(nif)),
         _run_source("pt2030", pt2030_source.search_by_nif(nif)),
     ]

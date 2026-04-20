@@ -21,7 +21,7 @@ from typing import Any
 
 from ..models import EntityProfile
 from ..storage import BulkTable, NameIndexTable
-from .base import DataSource
+from .base import DataSource, parse_pt_number
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,20 @@ class EntitiesSource(DataSource):
 
     async def _ensure_loaded(self) -> None:
         """Idempotent load — serialized via `_load_once` so concurrent
-        first queries don't each re-download + re-parse the dataset."""
+        first queries don't each re-download + re-parse the dataset.
+
+        Re-evaluates the SQLite TTL after `_loaded=True` so a long-running
+        process doesn't serve stale entity data past the 24h refresh
+        window."""
+        if self._loaded:
+            table_fresh = await asyncio.to_thread(
+                self._table.is_fresh, CACHE_MAX_AGE_SECONDS
+            )
+            if not table_fresh:
+                logger.info(
+                    "IMPIC entities SQLite TTL expired — scheduling reload"
+                )
+                self._loaded = False
         await self._load_once(self._do_load, lambda: self._loaded)
 
     async def _do_load(self) -> None:
@@ -69,13 +82,16 @@ class EntitiesSource(DataSource):
 
         try:
             data = await self._load_entities()
-            await self._persist_entities(data)
-            self._loaded = True
+            # `_persist_entities` returns True only on a real write. Empty
+            # payloads / unusable rows short-circuit and return False so
+            # we DON'T flip `_loaded=True` and keep the cache reload path
+            # open for the next query. Previously `_loaded=True` was set
+            # unconditionally here, which left the source serving empty
+            # data until process restart on any cold-start network blip.
+            persisted = await self._persist_entities(data)
+            if persisted:
+                self._loaded = True
         except Exception as e:  # noqa: BLE001
-            # Don't flip `_loaded=True` on failure: otherwise a transient
-            # network blip at startup would silently serve empty results
-            # for the rest of the process lifetime. `_load_once` will see
-            # the flag still False and let the next query re-enter.
             logger.warning(
                 f"Failed to load IMPIC entities (will retry on next query): {e}"
             )
@@ -129,13 +145,13 @@ class EntitiesSource(DataSource):
             logger.warning(f"Failed to resolve IMPIC entities URL: {e}")
         return None
 
-    async def _persist_entities(self, entities: list[dict]) -> None:
+    async def _persist_entities(self, entities: list[dict]) -> bool:
         """Write entities + name index to SQLite.
 
-        We build the two (key, row) lists up-front and then hand both off
-        to `BulkTable.replace_all` / `NameIndexTable.replace_all`. Each
-        table is rewritten atomically inside its own transaction.
-        """
+        Returns True iff the tables were actually rewritten. Callers use
+        this to decide whether to flip `self._loaded`; empty / unusable
+        payloads skip the write AND return False so the retry loop
+        stays armed."""
         # Refuse to overwrite the tables with an empty payload — if the
         # upstream download returned nothing (404, malformed JSON, etc.)
         # yesterday's 110K-entity cache is strictly better than wiping
@@ -145,7 +161,7 @@ class EntitiesSource(DataSource):
                 "IMPIC entities payload is empty — keeping previous "
                 "cache instead of persisting 0 rows"
             )
-            return
+            return False
 
         nif_rows: list[tuple[str, dict]] = []
         name_rows: list[tuple[str, str]] = []
@@ -166,12 +182,12 @@ class EntitiesSource(DataSource):
                 "IMPIC entities contained no usable NIF rows — "
                 "keeping previous cache"
             )
-            return
+            return False
 
         try:
             await asyncio.to_thread(self._table.replace_all, nif_rows)
             await asyncio.to_thread(self._name_index.replace_all, name_rows)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 - log and re-raise
             logger.warning(f"Failed to persist IMPIC entities to SQLite: {e}")
             # Re-raise so the caller's `_loaded=True` stays gated on success.
             raise
@@ -180,23 +196,24 @@ class EntitiesSource(DataSource):
             f"Indexed IMPIC entities: {len(nif_rows)} by NIF, "
             f"{len(name_rows)} name-indexed rows"
         )
+        return True
 
     def _to_profile(self, raw: dict) -> EntityProfile:
         """Convert raw entity dict to EntityProfile model."""
 
-        def _safe_float(val: Any) -> float | None:
-            if val is None:
-                return None
-            try:
-                return float(str(val).replace(",", ".").replace(" ", ""))
-            except (ValueError, TypeError):
-                return None
+        # Use the shared Portuguese-aware parser; IMPIC entity
+        # aggregate values ("totalContratosFornecedor" etc.) are
+        # exposed in PT locale (`"1.234.567,89"`) and the old naive
+        # `.replace(",", ".")` silently dropped the thousands
+        # separators, causing 1000× undercount on every profile.
+        _safe_float = parse_pt_number
 
         def _safe_int(val: Any) -> int | None:
-            if val is None:
+            parsed = parse_pt_number(val)
+            if parsed is None:
                 return None
             try:
-                return int(float(str(val).replace(",", ".").replace(" ", "")))
+                return int(parsed)
             except (ValueError, TypeError):
                 return None
 

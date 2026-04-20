@@ -164,7 +164,7 @@ class GleifSource(DataSource):
                     logger.warning(
                         f"GLEIF direct-parent returned {resp.status_code} for {lei}"
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - relationship enrichment is best-effort
                 logger.warning(f"GLEIF direct-parent fetch failed for {lei}: {e}")
 
             # Direct children (paginated)
@@ -181,7 +181,7 @@ class GleifSource(DataSource):
                         break
                     resp.raise_for_status()
                     data = resp.json()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - relationship enrichment is best-effort
                     logger.warning(
                         f"GLEIF direct-children fetch failed for {lei} p{page}: {e}"
                     )

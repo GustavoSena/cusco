@@ -10,6 +10,17 @@
 # The PR body is the same skeleton the sync workflow expects: it has the
 # two marker pairs (`RELEASE_PR:PRS_*` and `RELEASE_PR:CLOSES_*`) empty
 # and ready to be filled as new PRs merge to develop.
+#
+# ⚠️  GITHUB_TOKEN caveat — action-created PRs don't trigger workflows.
+# -------------------------------------------------------------------
+# GitHub explicitly blocks recursion: a PR opened using the default
+# `GITHUB_TOKEN` will NOT fire `pull_request` or `push` events on
+# downstream workflows (CodeRabbit, CI, etc.). If you want CodeRabbit
+# or CI to run on the freshly-opened release PR automatically, swap
+# `${{ secrets.GITHUB_TOKEN }}` below for a PAT stored as a repo secret
+# (e.g. `secrets.RELEASE_PAT`) that is scoped to `repo` / `workflow`.
+# Without a PAT, the first way to trigger CI on this PR is to push
+# another commit to `develop` or close-and-reopen it manually.
 name: Release PR open
 
 on:

@@ -110,17 +110,36 @@ export function CompanyOverview({ report, loading }: Props) {
           {narrative}
         </div>
       ) : streaming ? (
+        // `role="status"` makes the loading state perceivable to assistive
+        // tech (announced politely). `aria-hidden="true"` on the SAME
+        // element previously nullified that, so screen-reader users saw
+        // nothing between the heading and the arriving text. The decorative
+        // skeleton bars below opt out of the tree individually instead.
         <div
           className="space-y-2"
-          aria-hidden="true"
           role="status"
           aria-label="Generating company overview"
         >
-          <div className="h-3 bg-stone-100 rounded animate-pulse w-full" />
-          <div className="h-3 bg-stone-100 rounded animate-pulse w-11/12" />
-          <div className="h-3 bg-stone-100 rounded animate-pulse w-10/12" />
-          <div className="h-3 bg-stone-100 rounded animate-pulse w-9/12" />
-          <div className="h-3 bg-stone-100 rounded animate-pulse w-8/12" />
+          <div
+            className="h-3 bg-stone-100 rounded animate-pulse w-full"
+            aria-hidden="true"
+          />
+          <div
+            className="h-3 bg-stone-100 rounded animate-pulse w-11/12"
+            aria-hidden="true"
+          />
+          <div
+            className="h-3 bg-stone-100 rounded animate-pulse w-10/12"
+            aria-hidden="true"
+          />
+          <div
+            className="h-3 bg-stone-100 rounded animate-pulse w-9/12"
+            aria-hidden="true"
+          />
+          <div
+            className="h-3 bg-stone-100 rounded animate-pulse w-8/12"
+            aria-hidden="true"
+          />
         </div>
       ) : (
         // Stream completed without any chunks (no error emitted) — rare,

@@ -19,7 +19,15 @@ export function usePreference(
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw === null) return defaultValue;
-      return raw === "1" || raw === "true";
+      // Accept the canonical serializations we write. Anything else
+      // (e.g. a user typed "yes" into DevTools, or a legacy key from
+      // a prior version) falls through to `defaultValue` instead of
+      // silently flipping the preference off — the old truthy test
+      // treated every non-"1"/"true" string as false, which would
+      // disable an opt-in preference whose default was true.
+      if (raw === "1" || raw === "true") return true;
+      if (raw === "0" || raw === "false") return false;
+      return defaultValue;
     } catch {
       return defaultValue;
     }

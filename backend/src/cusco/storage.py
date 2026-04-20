@@ -181,9 +181,14 @@ class BulkTable:
             self._ensure_schema(conn)
             conn.execute("BEGIN")
             try:
-                conn.execute(f'DELETE FROM "{self.name}"')
+                # Ruff flags the f-string DDL below (S608) because `self.name`
+                # is interpolated — but it's validated against
+                # `_TABLE_NAME_RE` in __init__, so a non-identifier can't
+                # reach these statements. All user data is still passed as
+                # bound parameters (`?`). Suppress the S608 noise explicitly.
+                conn.execute(f'DELETE FROM "{self.name}"')  # noqa: S608
                 conn.executemany(
-                    f'INSERT INTO "{self.name}"(nif, payload) VALUES (?, ?)',
+                    f'INSERT INTO "{self.name}"(nif, payload) VALUES (?, ?)',  # noqa: S608
                     (
                         (
                             str(nif),
@@ -192,7 +197,7 @@ class BulkTable:
                         for nif, payload in rows
                     ),
                 )
-                cur = conn.execute(f'SELECT COUNT(*) AS c FROM "{self.name}"')
+                cur = conn.execute(f'SELECT COUNT(*) AS c FROM "{self.name}"')  # noqa: S608
                 count = cur.fetchone()["c"]
                 conn.execute(
                     "INSERT OR REPLACE INTO _meta(name, loaded_at, row_count) "
@@ -219,7 +224,8 @@ class BulkTable:
             with closing(get_connection()) as conn:
                 self._ensure_schema(conn)
                 cur = conn.execute(
-                    f'SELECT payload FROM "{self.name}" WHERE nif = ?', (nif,)
+                    f'SELECT payload FROM "{self.name}" WHERE nif = ?',  # noqa: S608
+                    (nif,),
                 )
                 return [json.loads(row["payload"]) for row in cur.fetchall()]
         except sqlite3.Error as e:
@@ -278,12 +284,13 @@ class NameIndexTable:
             self._ensure_schema(conn)
             conn.execute("BEGIN")
             try:
-                conn.execute(f'DELETE FROM "{self.name}"')
+                # See BulkTable.replace_all: table name is regex-validated.
+                conn.execute(f'DELETE FROM "{self.name}"')  # noqa: S608
                 conn.executemany(
-                    f'INSERT INTO "{self.name}"(name_lower, nif) VALUES (?, ?)',
+                    f'INSERT INTO "{self.name}"(name_lower, nif) VALUES (?, ?)',  # noqa: S608
                     ((str(name), str(nif)) for name, nif in rows),
                 )
-                cur = conn.execute(f'SELECT COUNT(*) AS c FROM "{self.name}"')
+                cur = conn.execute(f'SELECT COUNT(*) AS c FROM "{self.name}"')  # noqa: S608
                 count = cur.fetchone()["c"]
                 conn.execute(
                     "INSERT OR REPLACE INTO _meta(name, loaded_at, row_count) "
@@ -313,7 +320,7 @@ class NameIndexTable:
                 exact = [
                     row["nif"]
                     for row in conn.execute(
-                        f'SELECT DISTINCT nif FROM "{self.name}" '
+                        f'SELECT DISTINCT nif FROM "{self.name}" '  # noqa: S608
                         "WHERE name_lower = ? LIMIT ?",
                         (q, limit),
                     )
@@ -328,7 +335,7 @@ class NameIndexTable:
                 partial = [
                     row["nif"]
                     for row in conn.execute(
-                        f'SELECT DISTINCT nif FROM "{self.name}" '
+                        f'SELECT DISTINCT nif FROM "{self.name}" '  # noqa: S608
                         "WHERE name_lower LIKE ? ESCAPE '\\' "
                         "AND name_lower != ? LIMIT ?",
                         (like, q, remaining),
