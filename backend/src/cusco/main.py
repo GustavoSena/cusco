@@ -273,40 +273,6 @@ async def _enrich_adc(report: EntityReport) -> None:
         logger.warning(f"AdC name cross-reference failed: {e}")
 
 
-async def _enrich_seg_social(report: EntityReport) -> None:
-    """Filter Seg Social procedures by the resolved company name.
-
-    `SegSocialSource.search_by_nif` intentionally returns empty because
-    the API has no NIF filter; actual matching happens here once
-    `entities`/`gleif`/`ptdata` have supplied a name. For private
-    companies this silently resolves to zero matches — the card
-    self-hides — while public-sector entities get their procedures.
-    """
-    if report.seg_social_procedures:
-        return
-
-    company_name = None
-    if report.company and report.company.name:
-        company_name = report.company.name
-    elif report.entity_profile and report.entity_profile.name:
-        company_name = report.entity_profile.name
-    elif report.lei_record and report.lei_record.legal_name:
-        company_name = report.lei_record.legal_name
-
-    if not company_name:
-        return
-
-    try:
-        data = await seg_social_source.search_by_company_name(company_name)
-        procedures = data.get("seg_social_procedures") or []
-        organisms = data.get("seg_social_organisms") or []
-        if procedures or organisms:
-            report.seg_social_procedures = procedures
-            report.seg_social_organisms = organisms
-    except Exception as e:  # noqa: BLE001 - enrichment is best-effort
-        logger.warning(f"Seg Social name enrichment failed: {e}")
-
-
 async def _enrich_corporate_group(report: EntityReport) -> None:
     """Fill `corporate_group` from GLEIF parent/child relationships.
 
@@ -384,10 +350,6 @@ async def search_entity(
     # AdC cross-reference by company name
     await _enrich_adc(report)
 
-    # Seg Social cross-reference by company name (seg_social.search_by_nif
-    # returns empty; matching happens here once the name is resolved).
-    await _enrich_seg_social(report)
-
     # Corporate group via GLEIF parent/children
     await _enrich_corporate_group(report)
 
@@ -453,10 +415,6 @@ async def search_entity_stream(
 
         # AdC cross-reference after all sources complete
         await _enrich_adc(report)
-
-        # Seg Social cross-reference by company name (see _enrich_seg_social
-        # for why search_by_nif returns empty).
-        await _enrich_seg_social(report)
 
         # Corporate group via GLEIF parent/children
         await _enrich_corporate_group(report)
