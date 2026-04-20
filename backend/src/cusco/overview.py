@@ -38,6 +38,13 @@ OVERVIEW_CACHE_DIR = _resolve_overview_cache_dir()
 # is just a safety net for prompt tweaks or model upgrades.
 CACHE_MAX_AGE_SECONDS = 30 * 24 * 3600
 
+# Bumped whenever OVERVIEW_SYSTEM_PROMPT or `build_overview_messages`
+# changes in a way that affects output. The cache hash includes this
+# AND the active model env, so changing either invalidates stale cache
+# entries from prior deploys (otherwise we'd serve pre-rewrite prompts
+# for up to 30 days after every prompt change).
+OVERVIEW_PROMPT_VERSION = 2  # v2: split system / user messages (round-3 CodeRabbit)
+
 # Truncation limits — the overview prompt only needs a representative sample
 # of contracts (plus aggregate stats already summarised in the report), not
 # every single record. Keeping this small controls prompt size and cost.
@@ -195,10 +202,18 @@ def _hash_report_for_cache(report: EntityReport) -> str:
     """Stable short hash of the report fields that influence the narrative.
 
     Excludes timestamps and per-source status metadata so that transient
-    pending/retry noise doesn't invalidate an otherwise unchanged report."""
+    pending/retry noise doesn't invalidate an otherwise unchanged report.
+    Includes `OVERVIEW_PROMPT_VERSION` and the active model so a prompt
+    rewrite or model swap automatically invalidates stale cache entries
+    (otherwise we'd keep serving pre-change narratives for 30 days)."""
     data = report.model_dump(mode="json")
     data.pop("queried_at", None)
     data.pop("source_statuses", None)
+    # Cache-key discriminators: bumping the prompt version OR changing
+    # CUSCO_CHAT_MODEL between deploys produces a different hash,
+    # forcing regeneration so the narrative reflects the new prompt/model.
+    data["__prompt_version__"] = OVERVIEW_PROMPT_VERSION
+    data["__model__"] = os.getenv("CUSCO_CHAT_MODEL", "gpt-5.1")
     canonical = json.dumps(data, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
@@ -343,24 +358,28 @@ async def stream_overview(report: EntityReport) -> AsyncGenerator[str, None]:
         yield _sse_event("done")
         return
 
-    client = openai.AsyncOpenAI(api_key=api_key)
     model = os.getenv("CUSCO_CHAT_MODEL", "gpt-5.1")
     messages = build_overview_messages(report)
 
     collected: list[str] = []
 
+    # `async with` ensures the underlying httpx client closes on both
+    # the happy path and all exception paths — previously we held a
+    # plain `openai.AsyncOpenAI(...)` which never called `close()`,
+    # leaking one httpx connection per overview request.
     try:
-        stream = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            stream=True,
-        )
+        async with openai.AsyncOpenAI(api_key=api_key) as client:
+            stream = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                stream=True,
+            )
 
-        async for chunk in stream:
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if delta and delta.content:
-                collected.append(delta.content)
-                yield _sse_event("chunk", text=delta.content)
+            async for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    collected.append(delta.content)
+                    yield _sse_event("chunk", text=delta.content)
     except openai.RateLimitError:
         yield _sse_event(
             "error",

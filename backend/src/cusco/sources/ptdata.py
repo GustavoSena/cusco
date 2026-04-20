@@ -39,8 +39,15 @@ class PTDataSource(DataSource):
                 resp = await client.get(f"{PTDATA_BASE}/companies/{nif}")
                 resp.raise_for_status()
                 payload = resp.json()
-        except Exception as e:
-            logger.warning(f"ptdata /companies lookup failed for {nif}: {e}")
+        except Exception as e:  # noqa: BLE001 - graceful degradation on any upstream error
+            # Log only the last 3 digits of the NIF rather than the full
+            # identifier. This is an internal tool so leakage risk is low,
+            # but logs are often aggregated into shared observability
+            # stacks, and there's no operational reason to see the full
+            # NIF in a failure warning — the suffix is enough to correlate
+            # with the request trace.
+            suffix = nif[-3:] if isinstance(nif, str) and len(nif) >= 3 else "???"
+            logger.warning(f"ptdata /companies lookup failed for ***{suffix}: {e}")
             return {"ptdata_company": None}
 
         data = payload.get("data") if isinstance(payload, dict) else None

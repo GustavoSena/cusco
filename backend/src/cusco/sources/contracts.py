@@ -11,7 +11,7 @@ from typing import Any
 
 from ..models import Contract
 from ..storage import BulkTable
-from .base import DataSource
+from .base import DataSource, parse_pt_number
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,28 @@ class ContractsSource(DataSource):
 
         Serialized via `_load_once` so concurrent first queries don't each
         re-download + re-parse the (large) dataset.
+
+        Re-checks freshness even AFTER the first successful load — a
+        bare `self._loaded` gate would prevent refresh for the rest of
+        the process lifetime, so a backend running > 24 hours would
+        serve yesterday's contracts indefinitely. Once the on-disk
+        TTL expires we flip `_loaded` back to False so the standard
+        `_load_once` path re-enters `_do_load` (which itself short-
+        circuits if the SQLite tables are still fresh from another
+        process, e.g. a sibling worker).
         """
+        if self._loaded:
+            supplier_fresh = await asyncio.to_thread(
+                self._supplier_table.is_fresh, CACHE_MAX_AGE_SECONDS
+            )
+            entity_fresh = await asyncio.to_thread(
+                self._entity_table.is_fresh, CACHE_MAX_AGE_SECONDS
+            )
+            if not (supplier_fresh and entity_fresh):
+                logger.info(
+                    "Contracts SQLite TTL expired — scheduling reload"
+                )
+                self._loaded = False
         await self._load_once(self._do_load, lambda: self._loaded)
 
     async def _do_load(self) -> None:
@@ -275,13 +296,13 @@ class ContractsSource(DataSource):
             return default
 
         def _get_float(keys: list[str]) -> float | None:
+            # Uses the shared Portuguese-aware parser: a contract price
+            # of "1.234,56" would previously parse as 1.234 (silent 1000×
+            # undercount that poisoned every aggregate total).
             for k in keys:
-                v = raw.get(k)
-                if v:
-                    try:
-                        return float(str(v).replace(",", ".").replace(" ", ""))
-                    except ValueError:
-                        continue
+                parsed = parse_pt_number(raw.get(k))
+                if parsed is not None:
+                    return parsed
             return None
 
         # Parse "NIF - Name" list format from IMPIC JSON
@@ -400,15 +421,16 @@ class ContractsSource(DataSource):
 
     @classmethod
     def _price_of(cls, raw: dict) -> float:
-        """Parse a contract's price, matching _to_contract's normalization."""
+        """Parse a contract's price, matching _to_contract's normalization.
+
+        Uses the shared Portuguese-aware `parse_pt_number` — the previous
+        naive `float(s.replace(",", "."))` mis-parsed "1.234,56" as 1.234
+        (a 1000× undercount that poisoned every municipality aggregate).
+        """
         for key in cls._PRICE_KEYS:
-            v = raw.get(key)
-            if v in (None, ""):
-                continue
-            try:
-                return float(str(v).replace(",", ".").replace(" ", ""))
-            except (ValueError, TypeError):
-                continue
+            parsed = parse_pt_number(raw.get(key))
+            if parsed is not None:
+                return parsed
         return 0.0
 
     def _aggregate_municipalities(

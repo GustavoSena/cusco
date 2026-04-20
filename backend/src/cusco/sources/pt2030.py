@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from ..models import PT2030Funding
-from .base import DataSource
+from .base import DataSource, parse_pt_number
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +34,10 @@ CACHE_DIR = Path(os.environ.get("CUSCO_CACHE_DIR", "/tmp/cusco_cache"))
 CACHE_MAX_AGE_SECONDS = 24 * 3600  # 1 day
 
 
-def _safe_float(val: Any) -> float | None:
-    if val is None or val == "":
-        return None
-    try:
-        return float(str(val).replace(",", ".").replace(" ", ""))
-    except (ValueError, TypeError):
-        return None
+# Thin wrapper kept for readability at call sites; delegates to the
+# shared Portuguese-aware parser. Fixes silent 1000× undercount when
+# PT2030 XLSX cells come through as "1.234.567,89".
+_safe_float = parse_pt_number
 
 
 def _normalize_nif(val: Any) -> str:
@@ -67,7 +64,21 @@ class PT2030Source(DataSource):
 
     async def _ensure_loaded(self) -> None:
         """Idempotent load — serialized via `_load_once` so concurrent
-        first queries don't each re-download + re-parse the dataset."""
+        first queries don't each re-download + re-parse the dataset.
+
+        Re-checks the on-disk cache TTL even after `_loaded=True`, so a
+        process running > 24h doesn't serve yesterday's dataset forever.
+        `_load_once` still handles serialization and the in-memory
+        short-circuit for concurrent callers."""
+        if self._loaded:
+            cache_file = CACHE_DIR / "pt2030_entidades.json"
+            try:
+                age = time.time() - cache_file.stat().st_mtime
+            except OSError:
+                age = float("inf")  # missing/unreadable → treat as stale
+            if age >= CACHE_MAX_AGE_SECONDS:
+                logger.info("PT2030 cache TTL expired — scheduling reload")
+                self._loaded = False
         await self._load_once(self._do_load, lambda: self._loaded)
 
     async def _do_load(self) -> None:

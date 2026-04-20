@@ -198,11 +198,22 @@ export function ChatPanel({ report, loading = false }: Props) {
               <button
                 type="submit"
                 disabled={disabled || !input.trim()}
+                // Explicit aria-label so screen readers still hear a
+                // purposeful button name when the visible content is
+                // just a spinner. Without this, the loading/streaming
+                // states present as an unnamed button.
+                aria-label={
+                  loading
+                    ? "Chat is waiting for the report to finish loading"
+                    : isStreaming
+                      ? "Waiting for the current answer to finish"
+                      : "Send message"
+                }
                 title={disabledReason || undefined}
                 className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 active:scale-[0.97] disabled:bg-stone-300 disabled:cursor-not-allowed transition-all duration-150"
               >
                 {loading ? (
-                  <span className="inline-flex items-center gap-1">
+                  <span className="inline-flex items-center gap-1" aria-hidden="true">
                     <span className="inline-block w-3 h-3 border-2 border-white/60 border-t-white rounded-full animate-spin" />
                   </span>
                 ) : isStreaming ? (

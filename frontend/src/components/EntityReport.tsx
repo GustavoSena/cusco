@@ -10,6 +10,7 @@ import { CompanyOverview } from "./CompanyOverview";
 import { CorporateGroupCard } from "./CorporateGroupCard";
 import { EUFundingCard } from "./EUFundingCard";
 import { MunicipalitiesCard } from "./MunicipalitiesCard";
+import { SegSocialCard } from "./SegSocialCard";
 import { StreamSection, SkeletonHalfCard, SkeletonCard } from "./Skeleton";
 
 interface Props {
@@ -324,6 +325,22 @@ export function EntityReport({
             >
               <MunicipalitiesCard
                 municipalities={report.municipality_contracts ?? []}
+              />
+            </StreamSection>
+
+            {/* Segurança Social recruitment procedures — supplementary.
+                The backend has populated these fields since the initial
+                Seg Social source landed, but nothing was rendering them.
+                The card self-hides when there's no data, so private
+                companies don't see an empty "no procedures" section. */}
+            <StreamSection
+              source="seg_social"
+              report={report}
+              skeleton={<SkeletonCard lines={3} />}
+            >
+              <SegSocialCard
+                procedures={report.seg_social_procedures ?? []}
+                organisms={report.seg_social_organisms ?? []}
               />
             </StreamSection>
           </div>

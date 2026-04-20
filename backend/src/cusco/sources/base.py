@@ -7,6 +7,45 @@ from typing import Any, Awaitable, Callable
 import httpx
 
 
+def parse_pt_number(val: Any) -> float | None:
+    """Parse Portuguese-formatted numbers, with English as a fallback.
+
+    dados.gov.pt and SICAE sometimes emit decimals as ``"1.234,56"``
+    (PT locale: dot = thousands, comma = decimal), sometimes as
+    ``"1234,56"`` (no thousands), and sometimes as ``"1234.56"``
+    (English). A naive ``float(s.replace(",", "."))`` silently
+    mis-parses ``"1.234,56"`` as ``1.234`` — a 1000× undercount —
+    which then propagates into aggregated totals (price indices,
+    EU-funding sums, contract values) as silent data loss.
+
+    Rules:
+    - Strip whitespace and U+00A0 (NBSP, common in copy-paste).
+    - If both ``.`` and ``,`` are present: dots are thousands-separators,
+      comma is decimal → drop dots, swap comma → dot.
+    - If only ``,``: treat as decimal → swap to dot.
+    - If only ``.`` or neither: pass through to ``float()`` as-is.
+
+    Returns ``None`` on missing/unparsable input instead of raising,
+    so callers can keep their "best-effort" semantics.
+    """
+    if val is None or val == "":
+        return None
+    try:
+        text = str(val).strip().replace(" ", "").replace("\u00a0", "")
+        if not text:
+            return None
+        if "," in text and "." in text:
+            # Portuguese full format: "1.234.567,89"
+            text = text.replace(".", "").replace(",", ".")
+        elif "," in text:
+            # Portuguese short: "1234,56"
+            text = text.replace(",", ".")
+        # else: plain English "1234.56" or integer — already valid.
+        return float(text)
+    except (ValueError, TypeError):
+        return None
+
+
 class DataSource(ABC):
     """Base class for all data sources."""
 

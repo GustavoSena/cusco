@@ -23,7 +23,7 @@ from typing import Any
 
 from ..models import PRRContract, PRRFunding
 from ..storage import BulkTable
-from .base import DataSource
+from .base import DataSource, parse_pt_number
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +39,10 @@ DATASET_API_CONTRATOS = (
 CACHE_MAX_AGE_SECONDS = 24 * 3600  # 1 day
 
 
-def _safe_float(val: Any) -> float | None:
-    if val is None or val == "":
-        return None
-    try:
-        return float(str(val).replace(",", ".").replace(" ", ""))
-    except (ValueError, TypeError):
-        return None
+# Shared Portuguese-aware parser: the previous local implementation
+# mis-parsed "1.234.567,89" as 1.234. Kept as a module-level alias
+# for call-site readability.
+_safe_float = parse_pt_number
 
 
 def _json_safe(value: Any) -> Any:
@@ -85,7 +82,23 @@ class PRRSource(DataSource):
 
     async def _ensure_loaded(self) -> None:
         """Idempotent load — serialized via `_load_once` so concurrent
-        first queries don't each re-download + re-parse the dataset."""
+        first queries don't each re-download + re-parse the dataset.
+
+        Re-evaluates SQLite TTL after a successful load so long-running
+        processes pick up dataset refreshes instead of serving the first
+        successful snapshot forever."""
+        if self._loaded:
+            fundings_fresh = await asyncio.to_thread(
+                self._fundings_table.is_fresh, CACHE_MAX_AGE_SECONDS
+            )
+            contracts_fresh = await asyncio.to_thread(
+                self._contracts_table.is_fresh, CACHE_MAX_AGE_SECONDS
+            )
+            if not (fundings_fresh and contracts_fresh):
+                logger.info(
+                    "PRR SQLite TTL expired — scheduling reload"
+                )
+                self._loaded = False
         await self._load_once(self._do_load, lambda: self._loaded)
 
     async def _do_load(self) -> None:
@@ -185,7 +198,7 @@ class PRRSource(DataSource):
             return rows
 
     # Columns we actually read downstream — parser drops everything else to
-    # minimize row size (750K rows × unused columns = ~hundreds of MB).
+    # minimize row size (750K rows x unused columns = ~hundreds of MB).
     _ENTIDADES_COLUMNS = frozenset([
         "nif_entidade",
         "ds_entidade",
@@ -334,7 +347,7 @@ class PRRSource(DataSource):
                     url = resource.get("url") or ""
                     if url.lower().endswith(".xlsx"):
                         return url
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - URL resolution is best-effort
             logger.warning(f"Failed to resolve PRR dataset URL ({dataset_api}): {e}")
         return None
 

@@ -41,7 +41,19 @@ function MemberRow({
   member: GroupMember;
   onSelectNif: (nif: string) => void;
 }) {
-  const isPT = member.country === "PT" && member.nif;
+  // Searchable = PT company that actually has a NIF we can query.
+  // Two separate "not searchable" reasons: the entity is foreign (can't
+  // look it up against PT-only datasets), OR it's PT but the upstream
+  // source didn't include a NIF for it (nothing to query with). We
+  // distinguish the two so the former isn't mislabelled as the latter
+  // — a PT subsidiary with an empty NIF should not read as "non-PT".
+  const isSearchablePT = member.country === "PT" && !!member.nif;
+  const unavailableReason =
+    member.country === "PT" ? "missing NIF" : "non-PT";
+  const unavailableTitle =
+    member.country === "PT"
+      ? "PT entity — not searchable because no NIF is available for it"
+      : "Foreign entity — not searchable in this tool";
 
   const content = (
     <div className="flex items-start justify-between gap-3 w-full">
@@ -57,8 +69,10 @@ function MemberRow({
           )}
           <CountryBadge country={member.country} />
           <StatusBadge status={member.entity_status} />
-          {!isPT && (
-            <span className="text-[10px] text-stone-400">non-PT</span>
+          {!isSearchablePT && (
+            <span className="text-[10px] text-stone-400">
+              {unavailableReason}
+            </span>
           )}
         </div>
         {member.lei && (
@@ -70,7 +84,7 @@ function MemberRow({
     </div>
   );
 
-  if (isPT) {
+  if (isSearchablePT) {
     return (
       <button
         type="button"
@@ -82,13 +96,12 @@ function MemberRow({
     );
   }
 
-  // Non-PT member — display only. Visually dimmed + no hover affordance so
-  // users understand it isn't interactive (foreign NIFs aren't queryable
-  // against our PT-only data sources).
+  // Non-searchable member — display only. Visually dimmed + no hover
+  // affordance so users understand it isn't interactive.
   return (
     <div
       className="w-full p-3 rounded border border-dashed border-stone-200 bg-stone-50/60 opacity-80"
-      title="Foreign entity — not searchable in this tool"
+      title={unavailableTitle}
     >
       {content}
     </div>
