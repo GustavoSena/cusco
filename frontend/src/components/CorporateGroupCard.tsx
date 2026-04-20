@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CorporateGroup, GroupMember } from "../types";
+import { Pagination } from "./Pagination";
 
 interface Props {
   group: CorporateGroup;
   onSelectNif: (nif: string) => void;
 }
 
-const INITIAL_LIMIT = 10;
+const PAGE_SIZE = 5;
 
 function StatusBadge({ status }: { status: string }) {
   if (!status) return null;
@@ -96,12 +97,16 @@ function MemberRow({
 
 export function CorporateGroupCard({ group, onSelectNif }: Props) {
   const children = group.children ?? [];
-  const [expanded, setExpanded] = useState(false);
+  const [page, setPage] = useState(0);
+
+  // Reset pagination when the underlying group changes (different NIF)
+  useEffect(() => {
+    setPage(0);
+  }, [children.length]);
 
   if (!group.parent && children.length === 0) return null;
 
-  const visible = expanded ? children : children.slice(0, INITIAL_LIMIT);
-  const hasMore = children.length > INITIAL_LIMIT;
+  const visible = children.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
     <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6">
@@ -141,24 +146,13 @@ export function CorporateGroupCard({ group, onSelectNif }: Props) {
                 />
               ))}
             </div>
-            {hasMore && !expanded && (
-              <button
-                type="button"
-                onClick={() => setExpanded(true)}
-                className="mt-2 w-full py-1.5 text-xs text-brand-600 hover:text-brand-800 hover:bg-brand-50 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1"
-              >
-                Show {children.length - INITIAL_LIMIT} more
-              </button>
-            )}
-            {expanded && hasMore && (
-              <button
-                type="button"
-                onClick={() => setExpanded(false)}
-                className="mt-2 w-full py-1.5 text-xs text-stone-500 hover:text-stone-700 hover:bg-stone-50 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1"
-              >
-                Show less
-              </button>
-            )}
+            <Pagination
+              page={page}
+              pageSize={PAGE_SIZE}
+              totalItems={children.length}
+              onPageChange={setPage}
+              label="Subsidiaries pagination"
+            />
             {group.has_more_children && (
               <p className="mt-2 text-xs text-stone-400 text-center">
                 +{group.total_children - children.length} more subsidiaries not

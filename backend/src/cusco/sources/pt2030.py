@@ -66,8 +66,11 @@ class PT2030Source(DataSource):
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     async def _ensure_loaded(self) -> None:
-        if self._loaded:
-            return
+        """Idempotent load — serialized via `_load_once` so concurrent
+        first queries don't each re-download + re-parse the dataset."""
+        await self._load_once(self._do_load, lambda: self._loaded)
+
+    async def _do_load(self) -> None:
         try:
             rows = await self._load_rows()
             self._index(rows)
@@ -75,7 +78,6 @@ class PT2030Source(DataSource):
             logger.warning(f"Failed to load PT2030 entidades: {e}")
         self._loaded = True
         logger.info(f"Indexed PT2030: {len(self._by_nif)} NIFs")
-
     def _read_cache(self, path: Path) -> list[dict] | None:
         """Read a cached JSON file. Returns None if missing, corrupt, or
         unreadable — caller should re-download in that case."""

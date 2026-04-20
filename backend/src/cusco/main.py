@@ -56,14 +56,28 @@ pt2030_source = PT2030Source(timeout=60)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Cusco starting — contract data will load on first query.")
-    asyncio.create_task(_bg_load_contracts())
-    asyncio.create_task(_bg_load_entities())
-    asyncio.create_task(_bg_load_adc())
-    asyncio.create_task(_bg_load_prr())
-    asyncio.create_task(_bg_load_pt2030())
-    yield
-    logger.info("Cusco shutting down.")
+    logger.info("Cusco starting — bulk data will load in background.")
+    # Hold strong references to background tasks so they aren't garbage
+    # collected mid-run (RUF006). Tasks are cancelled + awaited on shutdown.
+    bg_tasks: list[asyncio.Task] = [
+        asyncio.create_task(_bg_load_contracts(), name="bg_load_contracts"),
+        asyncio.create_task(_bg_load_entities(), name="bg_load_entities"),
+        asyncio.create_task(_bg_load_adc(), name="bg_load_adc"),
+        asyncio.create_task(_bg_load_prr(), name="bg_load_prr"),
+        asyncio.create_task(_bg_load_pt2030(), name="bg_load_pt2030"),
+    ]
+    app.state.bg_tasks = bg_tasks
+    try:
+        yield
+    finally:
+        logger.info("Cusco shutting down.")
+        for t in bg_tasks:
+            t.cancel()
+        for t in bg_tasks:
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 async def _bg_load_contracts():

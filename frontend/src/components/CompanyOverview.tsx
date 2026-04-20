@@ -53,8 +53,10 @@ export function CompanyOverview({ report, loading }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report.nif, loading]);
 
-  // Don't render anything while waiting for the main report to stream
-  if (loading && !narrative && !errorMessage) return null;
+  // While a new report is loading, hide unconditionally. Previously this
+  // leaked the previous company's narrative/error into the new search while
+  // the main report was still streaming — stale intelligence.
+  if (loading) return null;
 
   // Error state — show a subtle "unavailable" notice (user deserves to know why the card is empty)
   if (errorMessage && !narrative) {
@@ -107,7 +109,7 @@ export function CompanyOverview({ report, loading }: Props) {
         >
           {narrative}
         </div>
-      ) : (
+      ) : streaming ? (
         <div
           className="space-y-2"
           aria-hidden="true"
@@ -120,6 +122,12 @@ export function CompanyOverview({ report, loading }: Props) {
           <div className="h-3 bg-stone-100 rounded animate-pulse w-9/12" />
           <div className="h-3 bg-stone-100 rounded animate-pulse w-8/12" />
         </div>
+      ) : (
+        // Stream completed without any chunks (no error emitted) — rare,
+        // but don't leave the skeleton spinning forever.
+        <p className="text-sm text-stone-500">
+          No summary was generated for this company.
+        </p>
       )}
 
       {/* If the stream failed after some chunks arrived, surface the partial

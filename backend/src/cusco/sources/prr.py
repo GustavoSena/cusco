@@ -8,22 +8,21 @@ Downloads two bulk XLSX datasets from dados.gov.pt:
 - PRR Contratos (~12K rows): public contracts signed under PRR funding, with
   contracting authority / supplier roles.
 
-Both are loaded once, parsed, cached as JSON in `CUSCO_CACHE_DIR`, and indexed
-by NIF in-memory (24h TTL). Pattern mirrors `contracts.py` / `entities.py`.
+Both are loaded once on a 24h TTL and persisted in SQLite
+(:mod:`cusco.storage`) — the DB IS the cache now, so warm restarts don't
+re-download or re-parse.
 """
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import io
-import json
 import logging
-import os
-import time
-from pathlib import Path
 from typing import Any
 
 from ..models import PRRContract, PRRFunding
+from ..storage import BulkTable
 from .base import DataSource
 
 logger = logging.getLogger(__name__)
@@ -37,7 +36,6 @@ DATASET_API_CONTRATOS = (
     "dataset-estrutura-de-missao-prr-entidades-contratos-publicos/"
 )
 
-CACHE_DIR = Path(os.environ.get("CUSCO_CACHE_DIR", "/tmp/cusco_cache"))
 CACHE_MAX_AGE_SECONDS = 24 * 3600  # 1 day
 
 
@@ -48,40 +46,6 @@ def _safe_float(val: Any) -> float | None:
         return float(str(val).replace(",", ".").replace(" ", ""))
     except (ValueError, TypeError):
         return None
-
-
-def _read_cache_json(path: Path) -> list[dict] | None:
-    """Read a cached JSON list. Returns None if missing, corrupt, or
-    unreadable — caller should re-download. Deletes corrupt files so the
-    next run starts clean."""
-    if not path.exists():
-        return None
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        logger.warning(f"PRR cache {path.name} unreadable ({e}); re-downloading")
-        try:
-            path.unlink()
-        except OSError:
-            pass
-        return None
-
-
-def _write_cache_atomic(path: Path, data: list[dict]) -> None:
-    """Atomic write via tmp + rename so a crash mid-write doesn't leave
-    a corrupt cache file."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    try:
-        with open(tmp, "w") as f:
-            json.dump(data, f)
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        raise
 
 
 def _json_safe(value: Any) -> Any:
@@ -113,62 +77,82 @@ class PRRSource(DataSource):
 
     def __init__(self, timeout: float = 120.0):
         super().__init__(timeout=timeout)
-        self._fundings_by_nif: dict[str, list[dict]] = {}
-        self._contracts_by_nif: dict[str, list[dict]] = {}
+        # Fundings keyed by nif_entidade, contracts keyed by cd_entidade
+        # (which is also a NIF-like value).
+        self._fundings_table = BulkTable("prr_fundings")
+        self._contracts_table = BulkTable("prr_contracts")
         self._loaded = False
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     async def _ensure_loaded(self) -> None:
-        if self._loaded:
+        """Idempotent load — serialized via `_load_once` so concurrent
+        first queries don't each re-download + re-parse the dataset."""
+        await self._load_once(self._do_load, lambda: self._loaded)
+
+    async def _do_load(self) -> None:
+        fundings_fresh = await asyncio.to_thread(
+            self._fundings_table.is_fresh, CACHE_MAX_AGE_SECONDS
+        )
+        contracts_fresh = await asyncio.to_thread(
+            self._contracts_table.is_fresh, CACHE_MAX_AGE_SECONDS
+        )
+        if fundings_fresh and contracts_fresh:
+            f_count = await asyncio.to_thread(self._fundings_table.row_count)
+            c_count = await asyncio.to_thread(self._contracts_table.row_count)
+            logger.info(
+                f"PRR: SQLite fresh — {f_count} funding rows, "
+                f"{c_count} contract rows (skipping download)"
+            )
+            self._loaded = True
             return
 
-        try:
-            fundings = await self._load_fundings()
-            self._index_fundings(fundings)
-        except Exception as e:
-            logger.warning(f"Failed to load PRR entidades: {e}")
+        if not fundings_fresh:
+            try:
+                fundings = await self._load_fundings()
+                rows = [
+                    (nif, row)
+                    for row in fundings
+                    if (nif := _normalize_nif(row.get("nif_entidade")))
+                ]
+                await asyncio.to_thread(self._fundings_table.replace_all, rows)
+            except Exception as e:
+                logger.warning(f"Failed to load PRR entidades: {e}")
 
-        try:
-            contracts = await self._load_contracts()
-            self._index_contracts(contracts)
-        except Exception as e:
-            logger.warning(f"Failed to load PRR contratos: {e}")
+        if not contracts_fresh:
+            try:
+                contracts = await self._load_contracts()
+                rows = [
+                    (nif, row)
+                    for row in contracts
+                    if (nif := _normalize_nif(row.get("cd_entidade")))
+                ]
+                await asyncio.to_thread(self._contracts_table.replace_all, rows)
+            except Exception as e:
+                logger.warning(f"Failed to load PRR contratos: {e}")
 
         self._loaded = True
+        f_count = await asyncio.to_thread(self._fundings_table.row_count)
+        c_count = await asyncio.to_thread(self._contracts_table.row_count)
         logger.info(
-            f"Indexed PRR: {len(self._fundings_by_nif)} NIFs with fundings, "
-            f"{len(self._contracts_by_nif)} NIFs with contracts"
+            f"Indexed PRR: {f_count} funding rows, {c_count} contract rows"
         )
 
     # -- Dataset A: Entidades ----------------------------------------------
     async def _load_fundings(self) -> list[dict]:
-        cache_file = CACHE_DIR / "prr_entidades.json"
-
-        if cache_file.exists():
-            age = time.time() - cache_file.stat().st_mtime
-            if age < CACHE_MAX_AGE_SECONDS:
-                logger.info("Loading PRR entidades from cache")
-                cached = _read_cache_json(cache_file)
-                if cached is not None:
-                    return cached
-
         url = await self._find_resource_url(DATASET_API_ENTIDADES, "entidades")
         if not url:
             logger.warning("Could not find PRR entidades download URL")
-            return _read_cache_json(cache_file) or []
+            return []
 
         async with self._client() as client:
             logger.info(f"Downloading PRR entidades from {url}...")
             resp = await client.get(url)
             resp.raise_for_status()
             rows = self._parse_prr_entidades_xlsx(resp.content)
-
-            _write_cache_atomic(cache_file, rows)
             logger.info(f"Loaded {len(rows)} PRR entidades rows")
             return rows
 
     # Columns we actually read downstream — parser drops everything else to
-    # minimize resident memory (750K rows × unused columns = ~hundreds of MB).
+    # minimize row size (750K rows × unused columns = ~hundreds of MB).
     _ENTIDADES_COLUMNS = frozenset([
         "nif_entidade",
         "ds_entidade",
@@ -196,7 +180,7 @@ class PRRSource(DataSource):
     ) -> list[dict]:
         """Parse an XLSX workbook into list[dict], retaining only the columns
         listed in ``keep_columns``. Unknown/empty headers are dropped entirely,
-        which keeps the resident index small even for 750K+ row datasets."""
+        which keeps the persisted payload small even for 750K+ row datasets."""
         from openpyxl import load_workbook
 
         wb = load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
@@ -234,13 +218,6 @@ class PRRSource(DataSource):
     def _parse_prr_entidades_xlsx(self, xlsx_bytes: bytes) -> list[dict]:
         return self._parse_xlsx_rows(xlsx_bytes, self._ENTIDADES_COLUMNS)
 
-    def _index_fundings(self, rows: list[dict]) -> None:
-        for row in rows:
-            nif = _normalize_nif(row.get("nif_entidade"))
-            if not nif:
-                continue
-            self._fundings_by_nif.setdefault(nif, []).append(row)
-
     def _to_funding(self, raw: dict) -> PRRFunding:
         return PRRFunding(
             project_code=str(raw.get("cd_projeto") or "").strip(),
@@ -255,42 +232,21 @@ class PRRSource(DataSource):
 
     # -- Dataset B: Contratos ----------------------------------------------
     async def _load_contracts(self) -> list[dict]:
-        cache_file = CACHE_DIR / "prr_contratos.json"
-
-        if cache_file.exists():
-            age = time.time() - cache_file.stat().st_mtime
-            if age < CACHE_MAX_AGE_SECONDS:
-                logger.info("Loading PRR contratos from cache")
-                cached = _read_cache_json(cache_file)
-                if cached is not None:
-                    return cached
-
-        url = await self._find_resource_url(
-            DATASET_API_CONTRATOS, "contratos"
-        )
+        url = await self._find_resource_url(DATASET_API_CONTRATOS, "contratos")
         if not url:
             logger.warning("Could not find PRR contratos download URL")
-            return _read_cache_json(cache_file) or []
+            return []
 
         async with self._client() as client:
             logger.info(f"Downloading PRR contratos from {url}...")
             resp = await client.get(url)
             resp.raise_for_status()
             rows = self._parse_prr_contratos_xlsx(resp.content)
-
-            _write_cache_atomic(cache_file, rows)
             logger.info(f"Loaded {len(rows)} PRR contratos rows")
             return rows
 
     def _parse_prr_contratos_xlsx(self, xlsx_bytes: bytes) -> list[dict]:
         return self._parse_xlsx_rows(xlsx_bytes, self._CONTRATOS_COLUMNS)
-
-    def _index_contracts(self, rows: list[dict]) -> None:
-        for row in rows:
-            nif = _normalize_nif(row.get("cd_entidade"))
-            if not nif:
-                continue
-            self._contracts_by_nif.setdefault(nif, []).append(row)
 
     def _to_contract(self, raw: dict) -> PRRContract:
         return PRRContract(
@@ -336,8 +292,12 @@ class PRRSource(DataSource):
         await self._ensure_loaded()
         nif = _normalize_nif(nif)
 
-        raw_fundings = self._fundings_by_nif.get(nif, [])
-        raw_contracts = self._contracts_by_nif.get(nif, [])
+        raw_fundings = await asyncio.to_thread(
+            self._fundings_table.get_by_nif, nif
+        )
+        raw_contracts = await asyncio.to_thread(
+            self._contracts_table.get_by_nif, nif
+        )
 
         fundings = [self._to_funding(r) for r in raw_fundings]
         contracts = [self._to_contract(r) for r in raw_contracts]

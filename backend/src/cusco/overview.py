@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from collections.abc import AsyncGenerator
@@ -22,15 +23,13 @@ logger = logging.getLogger(__name__)
 # etc.) still use CUSCO_CACHE_DIR (default /tmp/cusco_cache) since that data
 # is easily re-downloaded, but LLM output is expensive and worth persisting.
 #
-# Override via CUSCO_AI_CACHE_DIR. Falls back to CUSCO_CACHE_DIR/overviews
-# for backwards compatibility if someone was relying on the old location.
+# ONLY CUSCO_AI_CACHE_DIR is honoured for the AI cache. We intentionally do
+# NOT fall back to CUSCO_CACHE_DIR/overviews — that path is often /tmp and
+# ephemeral, which defeats the purpose of persisting expensive LLM output.
 def _resolve_overview_cache_dir() -> Path:
     explicit = os.environ.get("CUSCO_AI_CACHE_DIR")
     if explicit:
         return Path(explicit)
-    legacy_root = os.environ.get("CUSCO_CACHE_DIR")
-    if legacy_root:
-        return Path(legacy_root) / "overviews"
     return Path.home() / ".cusco" / "cache" / "overviews"
 
 
@@ -39,9 +38,27 @@ OVERVIEW_CACHE_DIR = _resolve_overview_cache_dir()
 # is just a safety net for prompt tweaks or model upgrades.
 CACHE_MAX_AGE_SECONDS = 30 * 24 * 3600
 
-# Truncation limits shared with chat.py — keeps LLM context size predictable
-MAX_CONTRACTS_IN_CONTEXT = 5100
+# Truncation limits — the overview prompt only needs a representative sample
+# of contracts (plus aggregate stats already summarised in the report), not
+# every single record. Keeping this small controls prompt size and cost.
+MAX_CONTRACTS_IN_CONTEXT = 100
 MAX_IBERINFORM_CHARS = 4000
+
+
+# Accept only 9-digit NIFs (matches the /api/search validation). Used to
+# prevent path traversal via client-supplied NIFs on POST /api/overview,
+# where the body isn't validated by the route's query-string pattern.
+_NIF_RE = re.compile(r"^\d{9}$")
+
+
+def _safe_nif(nif: str) -> str:
+    """Return the NIF if it matches the canonical 9-digit form, else raise.
+
+    Callers use this before passing a user-supplied NIF to filesystem paths.
+    """
+    if not isinstance(nif, str) or not _NIF_RE.match(nif):
+        raise ValueError(f"Invalid NIF for cache key: {nif!r}")
+    return nif
 
 # Fake-streaming parameters for cache hits
 _CACHED_CHUNK_SIZE = 20
@@ -127,7 +144,8 @@ def _hash_report_for_cache(report: EntityReport) -> str:
 
 
 def _cache_file(nif: str) -> Path:
-    return OVERVIEW_CACHE_DIR / f"{nif}.json"
+    # _safe_nif guarantees the NIF can't contain separators / traversal chars
+    return OVERVIEW_CACHE_DIR / f"{_safe_nif(nif)}.json"
 
 
 def get_cached_overview(nif: str, report_hash: str) -> str | None:
@@ -228,6 +246,17 @@ async def stream_overview(report: EntityReport) -> AsyncGenerator[str, None]:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         yield _sse_event("error", message="OpenAI API key not configured")
+        yield _sse_event("done")
+        return
+
+    # Guard against client-supplied NIFs that don't match the canonical form
+    # (POST /api/overview accepts the whole report from the client, so the
+    # NIF isn't enforced by the search route's ^\d{9}$ pattern).
+    try:
+        _safe_nif(report.nif)
+    except ValueError as e:
+        logger.warning(f"Overview rejected: {e}")
+        yield _sse_event("error", message="Invalid NIF")
         yield _sse_event("done")
         return
 
