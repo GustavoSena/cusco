@@ -150,6 +150,32 @@ export interface MunicipalityContract {
   total_value: number;
 }
 
+export interface CAECode {
+  code: string;
+  description: string;
+  type: string; // "principal" | "secundario"
+}
+
+export interface PTDataSourceStatus {
+  id: string;
+  name: string;
+  status: string;
+  records: number | null;
+}
+
+export interface PTDataCompany {
+  nif: string;
+  name: string;
+  sicae_name: string;
+  address: string;
+  type_code: string;
+  vat_active: boolean;
+  cae_codes: CAECode[];
+  source_checks: PTDataSourceStatus[];
+  public_contracts_total: number | null;
+  public_contracts_value: number | null;
+}
+
 export interface AdCProcess {
   process_number: string;
   process_type: string;
@@ -206,6 +232,7 @@ export interface EntityReport {
   pt2030_total_fund_paid: number;
   corporate_group: CorporateGroup | null;
   municipality_contracts: MunicipalityContract[];
+  ptdata_company: PTDataCompany | null;
   source_statuses: SourceResult[];
   queried_at: string;
 }

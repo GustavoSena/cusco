@@ -1,4 +1,5 @@
 from .nif import NifSource
+from .ptdata import PTDataSource
 from .citius import CitiusSource
 from .devedores import DevedoresSource
 from .contracts import ContractsSource
@@ -12,6 +13,7 @@ from .pt2030 import PT2030Source
 
 __all__ = [
     "NifSource",
+    "PTDataSource",
     "CitiusSource",
     "DevedoresSource",
     "ContractsSource",

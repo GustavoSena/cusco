@@ -228,6 +228,42 @@ class CorporateGroup(BaseModel):
     has_more_children: bool = False
 
 
+class CAECode(BaseModel):
+    """CAE industry classification code from ptdata.org / SICAE."""
+
+    code: str = ""
+    description: str = ""
+    type: str = ""  # "principal" | "secundario"
+
+
+class PTDataSourceStatus(BaseModel):
+    """Status of an upstream ptdata.org check (SICAE, VIES, BASE, etc.)."""
+
+    id: str = ""
+    name: str = ""
+    status: str = ""  # "ok" | other
+    records: int | None = None
+
+
+class PTDataCompany(BaseModel):
+    """Rich company data from ptdata.org /v1/companies/{nif}.
+
+    Fills gaps for entities that don't have an LEI in GLEIF — mainly the CAE
+    industry codes and SICAE-canonical address.
+    """
+
+    nif: str = ""
+    name: str = ""
+    sicae_name: str = ""
+    address: str = ""
+    type_code: str = ""
+    vat_active: bool = False
+    cae_codes: list[CAECode] = Field(default_factory=list)
+    source_checks: list[PTDataSourceStatus] = Field(default_factory=list)
+    public_contracts_total: int | None = None
+    public_contracts_value: float | None = None
+
+
 class SourceStatus(str, Enum):
     OK = "ok"
     ERROR = "error"
@@ -271,6 +307,7 @@ class EntityReport(BaseModel):
     pt2030_total_fund_paid: float = 0.0
     corporate_group: CorporateGroup | None = None
     municipality_contracts: list[MunicipalityContract] = Field(default_factory=list)
+    ptdata_company: PTDataCompany | None = None
     source_statuses: list[SourceResult] = Field(default_factory=list)
     queried_at: datetime = Field(default_factory=datetime.utcnow)
 

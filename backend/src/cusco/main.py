@@ -23,6 +23,7 @@ from .models import (
 from .overview import stream_overview
 from .sources import (
     NifSource,
+    PTDataSource,
     CitiusSource,
     DevedoresSource,
     ContractsSource,
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 # --- Source singletons (initialized at startup) ---
 nif_source = NifSource(timeout=10)
+ptdata_source = PTDataSource(timeout=15)
 citius_source = CitiusSource(timeout=20)
 devedores_source = DevedoresSource(timeout=60)
 contracts_source = ContractsSource(timeout=120, years=[2026, 2025, 2024])
@@ -142,7 +144,7 @@ async def _run_source(name: str, coro) -> tuple[str, dict | None, SourceResult]:
 
 # Source names in the order they appear in the tasks list
 _SOURCE_NAMES = [
-    "nif", "citius", "devedores", "contracts",
+    "nif", "ptdata_company", "citius", "devedores", "contracts",
     "entities", "gleif", "seg_social", "iberinform",
     "prr", "pt2030",
 ]
@@ -178,6 +180,11 @@ def _apply_source_data(report: EntityReport, source_name: str, data: dict | None
         report.lei_record = data["lei_record"]
         if report.company and not report.company.name:
             report.company.name = data["lei_record"].legal_name
+    if "ptdata_company" in data and data["ptdata_company"] is not None:
+        report.ptdata_company = data["ptdata_company"]
+        # Enrich company name from ptdata if still missing (SICAE-canonical)
+        if report.company and not report.company.name:
+            report.company.name = data["ptdata_company"].name
     if "seg_social_procedures" in data:
         report.seg_social_procedures = data["seg_social_procedures"]
     if "seg_social_organisms" in data:
@@ -291,6 +298,7 @@ async def search_entity(
     # Run all sources in parallel
     tasks = [
         _run_source("nif", nif_source.search_by_nif(nif)),
+        _run_source("ptdata_company", ptdata_source.search_by_nif(nif)),
         _run_source("citius", citius_source.search_by_nif(nif)),
         _run_source("devedores", devedores_source.search_by_nif(nif)),
         _run_source("contracts", contracts_source.search_by_nif(nif)),
@@ -336,6 +344,7 @@ async def search_entity_stream(
 
         source_coros = {
             "nif": nif_source.search_by_nif(nif),
+            "ptdata_company": ptdata_source.search_by_nif(nif),
             "citius": citius_source.search_by_nif(nif),
             "devedores": devedores_source.search_by_nif(nif),
             "contracts": contracts_source.search_by_nif(nif),
