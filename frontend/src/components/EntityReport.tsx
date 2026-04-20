@@ -152,6 +152,21 @@ export function EntityReport({
         <SourceStatuses statuses={report.source_statuses} />
       </div>
 
+      {/* When AI overview is ON, the Company Profile is promoted out of
+          the collapsible sections so the focal area of the page reads
+          as: header → identity card (compact) → AI narrative. The
+          profile still renders its own expand/collapse for deep detail,
+          and the CAE list within it truncates by default. */}
+      {aiOverviewAvailable && (
+        <StreamSection
+          source={["entities", "gleif"]}
+          report={report}
+          skeleton={<SkeletonCard lines={5} />}
+        >
+          <CompanyProfile report={report} compact />
+        </StreamSection>
+      )}
+
       {/* AI-generated overview */}
       {aiOverviewAvailable && (
         <CompanyOverview report={report} loading={loading} />
@@ -225,14 +240,17 @@ export function EntityReport({
               </StreamSection>
             </div>
 
-            {/* Company Profile — unified identity + stats from LEI, IMPIC, ptdata */}
-            <StreamSection
-              source={["entities", "gleif"]}
-              report={report}
-              skeleton={<SkeletonCard lines={5} />}
-            >
-              <CompanyProfile report={report} />
-            </StreamSection>
+            {/* Company Profile — only rendered in the collapsible when the
+                AI overview is OFF. When AI is ON, the profile is above. */}
+            {!aiOverviewAvailable && (
+              <StreamSection
+                source={["entities", "gleif"]}
+                report={report}
+                skeleton={<SkeletonCard lines={5} />}
+              >
+                <CompanyProfile report={report} />
+              </StreamSection>
+            )}
 
             {/* Corporate Group — populated via GLEIF enrichment */}
             {report.corporate_group && (

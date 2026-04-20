@@ -4,7 +4,19 @@ import { formatEUR } from "../format";
 
 interface Props {
   report: EntityReport;
+  /**
+   * When true, the profile opens in a denser layout intended to sit
+   * above the AI overview as the page focal point: CAE secondary codes
+   * default-truncated, Iberinform summary omitted (the AI narrative
+   * covers it), no hard borders that would fight the overview card.
+   */
+  compact?: boolean;
 }
+
+// Secondary CAE codes can get long (some companies list 30+). Show the
+// first N by default and hide the rest behind a "show all" click so
+// the profile doesn't dominate the viewport on code-heavy companies.
+const SECONDARY_CAE_DEFAULT_VISIBLE = 3;
 
 function parseIberinformContent(content: string): {
   fields: { label: string; value: string }[];
@@ -70,8 +82,9 @@ function parseIberinformContent(content: string): {
   return { fields, summary };
 }
 
-export function CompanyProfile({ report }: Props) {
+export function CompanyProfile({ report, compact = false }: Props) {
   const [showDetails, setShowDetails] = useState(true);
+  const [showAllCaes, setShowAllCaes] = useState(false);
 
   const profile = report.entity_profile;
   const lei = report.lei_record;
@@ -95,6 +108,14 @@ export function CompanyProfile({ report }: Props) {
   const hasLeiAddress = !!lei?.legal_address;
   const showPtdataAddress = !!ptdata?.address && !hasLeiAddress && !hasIberinform;
   const sourceChecks = ptdata?.source_checks ?? [];
+
+  const secondaryCaesHidden = Math.max(
+    0,
+    secondaryCaes.length - SECONDARY_CAE_DEFAULT_VISIBLE,
+  );
+  const visibleSecondaryCaes = showAllCaes
+    ? secondaryCaes
+    : secondaryCaes.slice(0, SECONDARY_CAE_DEFAULT_VISIBLE);
 
   return (
     <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6">
@@ -145,7 +166,11 @@ export function CompanyProfile({ report }: Props) {
                   </tbody>
                 </table>
               )}
-              {iberinform!.summary && (
+              {/* In compact mode (profile is the lede, AI overview comes
+                  below), the Iberinform "Summary" blurb is redundant
+                  with the AI narrative — hide it to keep the card
+                  tight. In full mode, show it as before. */}
+              {iberinform!.summary && !compact && (
                 <div className="p-3 bg-stone-50 rounded">
                   <p className="text-xs text-stone-500 uppercase tracking-wide mb-1">
                     Summary
@@ -358,8 +383,8 @@ export function CompanyProfile({ report }: Props) {
                   </div>
                 )}
                 {secondaryCaes.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {secondaryCaes.map((c) => (
+                  <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+                    {visibleSecondaryCaes.map((c) => (
                       <span
                         key={c.code}
                         title={c.description}
@@ -373,6 +398,21 @@ export function CompanyProfile({ report }: Props) {
                         )}
                       </span>
                     ))}
+                    {/* "show more" affordance when the list is truncated.
+                        Keeps the default view compact on companies with
+                        many secondary CAEs (common for holdings / retail). */}
+                    {secondaryCaesHidden > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllCaes(!showAllCaes)}
+                        aria-expanded={showAllCaes}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] text-brand-700 hover:text-brand-900 hover:bg-brand-50 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1"
+                      >
+                        {showAllCaes
+                          ? "Show fewer"
+                          : `+${secondaryCaesHidden} more`}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
