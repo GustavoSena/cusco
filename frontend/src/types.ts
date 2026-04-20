@@ -95,6 +95,87 @@ export interface SegSocialOrganism {
   procedure_count: number;
 }
 
+export interface PRRFunding {
+  project_code: string;
+  entity_name: string;
+  role: string;
+  cae_code: string;
+  municipality: string;
+  value_contracted: number | null;
+  value_paid: number | null;
+  reference_date: string;
+}
+
+export interface PRRContract {
+  contract_code: string;
+  description: string;
+  entity_name: string;
+  role: string;
+  value: number | null;
+  reference_date: string;
+}
+
+export interface PT2030Funding {
+  operation_code: string;
+  entity_name: string;
+  role: string;
+  beneficiary_percentage: number | null;
+  value_contractualized: number | null;
+  fund_approved: number | null;
+  fund_executed: number | null;
+  fund_paid: number | null;
+  framework: string;
+}
+
+export interface GroupMember {
+  nif: string;
+  name: string;
+  lei: string;
+  country: string;
+  entity_status: string;
+  relationship: string;
+}
+
+export interface CorporateGroup {
+  parent: GroupMember | null;
+  children: GroupMember[];
+  total_children: number;
+  has_more_children: boolean;
+}
+
+export interface MunicipalityContract {
+  nif: string;
+  name: string;
+  contract_count: number;
+  total_value: number;
+}
+
+export interface CAECode {
+  code: string;
+  description: string;
+  type: string; // "principal" | "secundario"
+}
+
+export interface PTDataSourceStatus {
+  id: string;
+  name: string;
+  status: string;
+  records: number | null;
+}
+
+export interface PTDataCompany {
+  nif: string;
+  name: string;
+  sicae_name: string;
+  address: string;
+  type_code: string;
+  vat_active: boolean;
+  cae_codes: CAECode[];
+  source_checks: PTDataSourceStatus[];
+  public_contracts_total: number | null;
+  public_contracts_value: number | null;
+}
+
 export interface AdCProcess {
   process_number: string;
   process_type: string;
@@ -140,6 +221,18 @@ export interface EntityReport {
   adc_processes: AdCProcess[];
   has_competition_issues: boolean;
   iberinform_content: string | null;
+  prr_fundings: PRRFunding[];
+  prr_contracts: PRRContract[];
+  has_prr_funding: boolean;
+  prr_total_contracted: number;
+  prr_total_paid: number;
+  pt2030_fundings: PT2030Funding[];
+  has_pt2030_funding: boolean;
+  pt2030_total_fund_approved: number;
+  pt2030_total_fund_paid: number;
+  corporate_group: CorporateGroup | null;
+  municipality_contracts: MunicipalityContract[];
+  ptdata_company: PTDataCompany | null;
   source_statuses: SourceResult[];
   queried_at: string;
 }

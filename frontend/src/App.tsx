@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SearchBar } from "./components/SearchBar";
 import { EntityReport } from "./components/EntityReport";
 import { ChatPanel } from "./components/ChatPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { searchByNifStream, searchByName } from "./api/client";
+import { ToggleSwitch } from "./components/ToggleSwitch";
+import { searchByNifStream, searchByName, fetchConfig } from "./api/client";
+import { usePreference } from "./hooks/usePreference";
 import type {
   EntityReport as EntityReportType,
   NameSearchMatch,
@@ -15,6 +17,32 @@ export default function App() {
   const [nameLoading, setNameLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nameResults, setNameResults] = useState<NameSearchMatch[]>([]);
+  const [aiOverviewAvailable, setAiOverviewAvailable] = useState(false);
+  const [chatAvailable, setChatAvailable] = useState(false);
+
+  // User preference — defaults to ON when the backend supports it. Stored
+  // in localStorage so the choice persists across sessions and tabs.
+  const [aiOverviewEnabled, setAiOverviewEnabled] = usePreference(
+    "aiOverview",
+    true,
+  );
+  // Effective flag: only enable AI overview when BOTH the backend reports
+  // it available (OPENAI_API_KEY configured) AND the user hasn't turned
+  // it off. Passing the combined flag down means no component has to
+  // juggle two variables.
+  const showAiOverview = aiOverviewAvailable && aiOverviewEnabled;
+
+  useEffect(() => {
+    fetchConfig()
+      .then((cfg) => {
+        setAiOverviewAvailable(cfg.ai_overview_available);
+        setChatAvailable(cfg.chat_available);
+      })
+      .catch(() => {
+        setAiOverviewAvailable(false);
+        setChatAvailable(false);
+      });
+  }, []);
 
   const handleSearchNif = async (nif: string) => {
     setLoading(true);
@@ -54,11 +82,27 @@ export default function App() {
     <ErrorBoundary>
       <div className="min-h-screen bg-stone-50">
       <header className="border-b border-stone-200">
-        <div className="max-w-5xl mx-auto px-4 py-4 sm:py-5 flex items-baseline gap-3 sm:gap-4">
+        <div className="max-w-5xl mx-auto px-4 py-4 sm:py-5 flex items-center gap-3 sm:gap-4">
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-stone-900">Cusco</h1>
-          <p className="text-xs sm:text-sm text-stone-400 hidden sm:block">
+          <p className="text-xs sm:text-sm text-stone-400 hidden sm:block flex-1">
             Entity intelligence for Portuguese companies
           </p>
+          {/* AI overview preference toggle — only rendered when the backend
+              reports the feature is available; otherwise there's nothing
+              meaningful for the user to toggle. */}
+          {aiOverviewAvailable && (
+            <ToggleSwitch
+              checked={aiOverviewEnabled}
+              onChange={setAiOverviewEnabled}
+              label="AI overview"
+              description={
+                aiOverviewEnabled
+                  ? "AI-generated company summary is enabled. Click to disable."
+                  : "AI-generated company summary is disabled. Click to enable."
+              }
+              adornment={<span aria-hidden="true">✨</span>}
+            />
+          )}
         </div>
       </header>
 
@@ -91,11 +135,23 @@ export default function App() {
 
         {report && (
           <>
-            <EntityReport report={report} loading={loading} />
-            {!loading && (
+            <EntityReport
+              report={report}
+              loading={loading}
+              aiOverviewAvailable={showAiOverview}
+              onSelectNif={handleSearchNif}
+            />
+            {/* Chat panel renders from the first moment we have ANY partial
+                report — the skeleton + spinner communicate to the user that
+                chat will be ready as soon as the report finishes streaming.
+                Previously we hid the panel until `loading` flipped false,
+                so users staring at a half-loaded report wondered whether
+                chat would appear at all. */}
+            {chatAvailable && (
               <ChatPanel
                 key={report.nif + report.queried_at}
                 report={report}
+                loading={loading}
               />
             )}
           </>

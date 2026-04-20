@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
 import logging
-import os
-import time
+import re
 import zipfile
-from pathlib import Path
 from typing import Any
 
 from ..models import Contract
+from ..storage import BulkTable
 from .base import DataSource
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,9 @@ DADOS_GOV_BASE = "https://dados.gov.pt/s/resources/contratos-publicos-portal-bas
 # We'll load the most recent years for faster startup
 DEFAULT_YEARS = [2026, 2025, 2024]
 
-CACHE_DIR = Path(os.environ.get("CUSCO_CACHE_DIR", "/tmp/cusco_cache"))
+# Freshness window for the SQLite tables. Matches the previous 24h JSON
+# cache TTL — if the tables are fresher than this we skip the download
+# entirely and just serve queries from disk.
 CACHE_MAX_AGE_SECONDS = 24 * 3600  # 1 day
 
 
@@ -30,45 +32,117 @@ class ContractsSource(DataSource):
     def __init__(self, timeout: float = 120.0, years: list[int] | None = None):
         super().__init__(timeout=timeout)
         self.years = years or DEFAULT_YEARS
-        self._contracts_by_supplier_nif: dict[str, list[dict]] = {}
-        self._contracts_by_entity_nif: dict[str, list[dict]] = {}
+        # Two SQLite tables, one per role. Each row is (nif, contract_dict_json)
+        # — same edge-list shape the old in-memory dicts held, which keeps
+        # `_aggregate_municipalities` and the rest of the read path untouched.
+        self._supplier_table = BulkTable("contracts_supplier")
+        self._entity_table = BulkTable("contracts_entity")
         self._loaded = False
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     async def _ensure_loaded(self) -> None:
-        """Download and index contract data if not already loaded."""
-        if self._loaded:
+        """Ensure the SQLite tables are fresh before serving queries.
+
+        Serialized via `_load_once` so concurrent first queries don't each
+        re-download + re-parse the (large) dataset.
+        """
+        await self._load_once(self._do_load, lambda: self._loaded)
+
+    async def _do_load(self) -> None:
+        # If both tables are fresh, skip the download entirely.
+        supplier_fresh = await asyncio.to_thread(
+            self._supplier_table.is_fresh, CACHE_MAX_AGE_SECONDS
+        )
+        entity_fresh = await asyncio.to_thread(
+            self._entity_table.is_fresh, CACHE_MAX_AGE_SECONDS
+        )
+        if supplier_fresh and entity_fresh:
+            supplier_rows = await asyncio.to_thread(self._supplier_table.row_count)
+            entity_rows = await asyncio.to_thread(self._entity_table.row_count)
+            logger.info(
+                f"Contracts: SQLite fresh — {supplier_rows} supplier rows, "
+                f"{entity_rows} entity rows (skipping download)"
+            )
+            self._loaded = True
             return
+
+        supplier_rows: list[tuple[str, dict]] = []
+        entity_rows: list[tuple[str, dict]] = []
 
         for year in self.years:
             try:
-                data = await self._load_year(year)
-                self._index_contracts(data)
+                contracts = await self._load_year(year)
+                self._extract_index_rows(contracts, supplier_rows, entity_rows)
             except Exception as e:
                 logger.warning(f"Failed to load contracts for {year}: {e}")
 
-        self._loaded = True
-        total = sum(len(v) for v in self._contracts_by_supplier_nif.values())
-        logger.info(
-            f"Indexed contracts: {total} supplier entries, "
-            f"{sum(len(v) for v in self._contracts_by_entity_nif.values())} entity entries"
-        )
+        # Each `replace_all` is its own transaction, so if we naively
+        # catch `Exception` around both we can leave supplier fresh while
+        # entity holds yesterday's rows — and `_loaded=True` would mask
+        # the skew across `search_by_nif` joins. Track them individually;
+        # only flip `_loaded` when both succeed so the next query retries.
+        #
+        # Also: if every `_load_year(...)` in the loop above failed or
+        # silently returned [], supplier_rows / entity_rows are empty.
+        # Calling `replace_all([])` would happily commit, wiping
+        # yesterday's 170K good rows to zero while bumping `_meta.loaded_at`
+        # so `is_fresh` reports True for the next 24h. `prr.py` and
+        # `entities.py` already guard against this; mirror the pattern here.
+        supplier_ok = True
+        entity_ok = True
+        if supplier_rows:
+            try:
+                await asyncio.to_thread(
+                    self._supplier_table.replace_all, supplier_rows
+                )
+            except Exception as e:  # noqa: BLE001
+                supplier_ok = False
+                logger.warning(
+                    f"Failed to persist supplier contracts to SQLite: {e}"
+                )
+        else:
+            supplier_ok = False
+            logger.warning(
+                "Contracts: 0 supplier rows parsed from upstream — "
+                "keeping previous cache instead of overwriting with empty"
+            )
+        if entity_rows:
+            try:
+                await asyncio.to_thread(self._entity_table.replace_all, entity_rows)
+            except Exception as e:  # noqa: BLE001
+                entity_ok = False
+                logger.warning(
+                    f"Failed to persist entity contracts to SQLite: {e}"
+                )
+        else:
+            entity_ok = False
+            logger.warning(
+                "Contracts: 0 entity rows parsed from upstream — "
+                "keeping previous cache instead of overwriting with empty"
+            )
+
+        if supplier_ok and entity_ok:
+            self._loaded = True
+            logger.info(
+                f"Indexed contracts: {len(supplier_rows)} supplier entries, "
+                f"{len(entity_rows)} entity entries"
+            )
+        else:
+            # `is_fresh` on the failed table will still report False on the
+            # next attempt (no `_meta` row committed), so `_do_load` will
+            # naturally rebuild both sides next time — no manual reset needed.
+            logger.warning(
+                "Contracts load incomplete "
+                f"(supplier={supplier_ok}, entity={entity_ok}) — "
+                "will retry on next query"
+            )
 
     async def _load_year(self, year: int) -> list[dict]:
-        """Download and parse contract data for a given year."""
-        cache_file = CACHE_DIR / f"contratos{year}.json"
+        """Download and parse contract data for a given year.
 
-        # Check cache
-        if cache_file.exists():
-            age = time.time() - cache_file.stat().st_mtime
-            if age < CACHE_MAX_AGE_SECONDS:
-                logger.info(f"Loading contracts {year} from cache")
-                with open(cache_file) as f:
-                    return json.load(f)
-
-        # Download ZIP
-        # The URL pattern from dados.gov.pt — we need to find the latest resource URL
-        # For now, try the XLSX approach via the zip files
+        The SQLite DB is the only cache now — this method always
+        downloads (callers are expected to check `is_fresh` before
+        calling).
+        """
         zip_url = await self._find_zip_url(year)
         if not zip_url:
             logger.warning(f"Could not find download URL for contracts {year}")
@@ -80,9 +154,6 @@ class ContractsSource(DataSource):
             resp.raise_for_status()
 
             contracts = self._parse_zip(resp.content)
-            # Cache parsed data
-            with open(cache_file, "w") as f:
-                json.dump(contracts, f)
             logger.info(f"Loaded {len(contracts)} contracts for {year}")
             return contracts
 
@@ -137,18 +208,23 @@ class ContractsSource(DataSource):
             logger.error(f"Failed to parse ZIP: {e}")
         return contracts
 
-    def _index_contracts(self, contracts: list[dict]) -> None:
-        """Build NIF-based indexes for fast lookup."""
-        for c in contracts:
-            # Index by supplier NIF(s)
-            supplier_nifs = self._extract_nifs(c, "supplier")
-            for nif in supplier_nifs:
-                self._contracts_by_supplier_nif.setdefault(nif, []).append(c)
+    def _extract_index_rows(
+        self,
+        contracts: list[dict],
+        supplier_rows: list[tuple[str, dict]],
+        entity_rows: list[tuple[str, dict]],
+    ) -> None:
+        """Flatten contracts into (nif, contract_dict) edges for each role.
 
-            # Index by contracting entity NIF
-            entity_nifs = self._extract_nifs(c, "entity")
-            for nif in entity_nifs:
-                self._contracts_by_entity_nif.setdefault(nif, []).append(c)
+        Same structure the old in-memory dict-of-lists held — we emit
+        one row per (nif, contract) pairing so `get_by_nif` can reconstruct
+        exactly what the dict lookup used to return.
+        """
+        for c in contracts:
+            for nif in self._extract_nifs(c, "supplier"):
+                supplier_rows.append((nif, c))
+            for nif in self._extract_nifs(c, "entity"):
+                entity_rows.append((nif, c))
 
     def _extract_nifs(self, contract: dict, role: str) -> list[str]:
         """Extract NIFs from a contract record.
@@ -158,8 +234,6 @@ class ContractsSource(DataSource):
           adjudicatarios: ["514181435 - GROWSKILLS ...", "504615947 - 1 - MEO ..."]
         We extract the leading 9-digit NIF from each entry.
         """
-        import re
-
         nifs = []
 
         if role == "supplier":
@@ -213,7 +287,6 @@ class ContractsSource(DataSource):
         # Parse "NIF - Name" list format from IMPIC JSON
         def _parse_nif_name_list(keys: list[str]) -> tuple[list[str], list[str]]:
             """Extract (names, nifs) from IMPIC 'NIF - Name' list fields."""
-            import re
             names, nifs = [], []
             for k in keys:
                 val = raw.get(k)
@@ -275,8 +348,8 @@ class ContractsSource(DataSource):
     async def search_by_nif(self, nif: str) -> dict[str, Any]:
         await self._ensure_loaded()
 
-        as_supplier = self._contracts_by_supplier_nif.get(nif, [])
-        as_entity = self._contracts_by_entity_nif.get(nif, [])
+        as_supplier = await asyncio.to_thread(self._supplier_table.get_by_nif, nif)
+        as_entity = await asyncio.to_thread(self._entity_table.get_by_nif, nif)
 
         # Deduplicate by contract id
         seen_ids: set[str] = set()
@@ -292,7 +365,112 @@ class ContractsSource(DataSource):
 
         total_value = sum(c.contract_price or 0 for c in all_contracts)
 
+        # Municipality aggregation: for contracts where this NIF was the
+        # supplier (adjudicatário), bucket by the contracting municipality
+        # so the UI can show "who this company sells to in the public sector".
+        municipalities = self._aggregate_municipalities(as_supplier, nif)
+
         return {
             "contracts": all_contracts,
             "contracts_total_value": total_value,
+            "municipality_contracts": municipalities,
         }
+
+    # Strict municipality pattern: entry must START with "Município de " or
+    # "Câmara Municipal de " (or "do"/"da"/"dos"/"das") right after the NIF
+    # separator. This excludes "Serviços Intermunicipalizados", "Águas do
+    # Município de X" (intermunicipal service companies), and other
+    # inter-municipal entities that aren't city halls proper.
+    _MUNICIPALITY_PATTERN = re.compile(
+        r"^(\d{9})\s*-\s*"
+        r"((?:Município|Câmara Municipal)\s+(?:de|do|da|dos|das)\s+.+?)"
+        r"\s*$",
+        re.IGNORECASE,
+    )
+
+    # Keep in sync with _to_contract._get_float — CSV rows use the
+    # human-readable "Preço Contratual" column header, JSON rows use
+    # the camelCase "precoContratual" / "precoEfetivo" keys.
+    _PRICE_KEYS = (
+        "precoContratual",
+        "contract_price",
+        "Preço Contratual",
+        "precoEfetivo",
+    )
+
+    @classmethod
+    def _price_of(cls, raw: dict) -> float:
+        """Parse a contract's price, matching _to_contract's normalization."""
+        for key in cls._PRICE_KEYS:
+            v = raw.get(key)
+            if v in (None, ""):
+                continue
+            try:
+                return float(str(v).replace(",", ".").replace(" ", ""))
+            except (ValueError, TypeError):
+                continue
+        return 0.0
+
+    def _aggregate_municipalities(
+        self, contracts_as_supplier: list[dict], supplier_nif: str
+    ) -> list[dict]:
+        """Bucket a supplier's contracts by the contracting municipality.
+
+        A municipality is identified by `_MUNICIPALITY_PATTERN` — which
+        requires the contracting entity string to start with "Município de X"
+        or "Câmara Municipal de X" right after the leading NIF. This excludes
+        inter-municipal service companies and similar entities that happen to
+        contain "Municipal" in their name.
+
+        Returns a list of {nif, name, contract_count, total_value} dicts
+        sorted by total_value descending.
+        """
+        buckets: dict[str, dict[str, Any]] = {}
+        seen_ids: set[str] = set()
+
+        for raw in contracts_as_supplier:
+            cid = str(raw.get("idcontrato") or raw.get("id") or "")
+            if cid and cid in seen_ids:
+                continue
+            if cid:
+                seen_ids.add(cid)
+
+            # adjudicante is a list of "NIF - Name" strings in IMPIC format
+            adjudicantes = raw.get("adjudicante") or []
+            if not isinstance(adjudicantes, list):
+                adjudicantes = [adjudicantes]
+
+            price = self._price_of(raw)
+
+            for entry in adjudicantes:
+                entry_str = str(entry).strip()
+                # Skip self-contracts (supplier = contracting entity)
+                if entry_str.startswith(supplier_nif):
+                    continue
+
+                m = self._MUNICIPALITY_PATTERN.match(entry_str)
+                if not m:
+                    continue
+
+                muni_nif = m.group(1)
+                muni_name = m.group(2).strip()
+
+                bucket = buckets.setdefault(
+                    muni_nif,
+                    {
+                        "nif": muni_nif,
+                        "name": muni_name,
+                        "contract_count": 0,
+                        "total_value": 0.0,
+                    },
+                )
+                bucket["contract_count"] += 1
+                bucket["total_value"] += price
+
+        # Sort by total value desc
+        out = sorted(
+            buckets.values(),
+            key=lambda b: b["total_value"],
+            reverse=True,
+        )
+        return out

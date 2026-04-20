@@ -156,6 +156,114 @@ class AdCProcess(BaseModel):
     pdf_url: str = ""
 
 
+class MunicipalityContract(BaseModel):
+    """Aggregated contract activity between a company and a municipality.
+
+    Derived from IMPIC contract data — for a given supplier, we bucket their
+    contracts by the contracting municipal entity (Município/Câmara Municipal)
+    and sum the values.
+    """
+
+    nif: str = ""
+    name: str = ""
+    contract_count: int = 0
+    total_value: float = 0.0
+
+
+class PRRFunding(BaseModel):
+    """PRR (Plano de Recuperação e Resiliência) funding record for an entity."""
+
+    project_code: str = ""
+    entity_name: str = ""
+    role: str = ""  # Beneficiário Final, Intermediário, etc.
+    cae_code: str = ""
+    municipality: str = ""
+    value_contracted: float | None = None
+    value_paid: float | None = None
+    reference_date: str = ""
+
+
+class PRRContract(BaseModel):
+    """PRR public contract entry."""
+
+    contract_code: str = ""
+    description: str = ""
+    entity_name: str = ""
+    role: str = ""  # Adjudicante, Adjudicatário
+    value: float | None = None
+    reference_date: str = ""
+
+
+class PT2030Funding(BaseModel):
+    """Portugal 2030 programme funding record for an entity."""
+
+    operation_code: str = ""
+    entity_name: str = ""
+    role: str = ""
+    beneficiary_percentage: float | None = None
+    value_contractualized: float | None = None
+    fund_approved: float | None = None
+    fund_executed: float | None = None
+    fund_paid: float | None = None
+    framework: str = ""
+
+
+class GroupMember(BaseModel):
+    """A member (parent or child) in a corporate group."""
+
+    nif: str = ""
+    name: str = ""
+    lei: str = ""
+    country: str = ""
+    entity_status: str = ""  # ACTIVE / INACTIVE
+    relationship: str = ""  # parent | child
+
+
+class CorporateGroup(BaseModel):
+    """Corporate group membership derived from GLEIF parent/child relationships."""
+
+    parent: GroupMember | None = None
+    children: list[GroupMember] = Field(default_factory=list)
+    total_children: int = 0  # full count from GLEIF even if truncated
+    has_more_children: bool = False
+
+
+class CAECode(BaseModel):
+    """CAE industry classification code from ptdata.org / SICAE."""
+
+    code: str = ""
+    description: str = ""
+    type: str = ""  # "principal" | "secundario"
+
+
+class PTDataSourceStatus(BaseModel):
+    """Status of an upstream ptdata.org check (SICAE, VIES, BASE, etc.)."""
+
+    id: str = ""
+    name: str = ""
+    status: str = ""  # "ok" | other
+    records: int | None = None
+
+
+class PTDataCompany(BaseModel):
+    """Rich company data from ptdata.org /v1/companies/{nif}.
+
+    Fills gaps for entities that don't have an LEI in GLEIF — mainly the CAE
+    industry codes and SICAE-canonical address.
+    """
+
+    nif: str = ""
+    name: str = ""
+    sicae_name: str = ""
+    address: str = ""
+    type_code: str = ""
+    vat_active: bool = False
+    cae_codes: list[CAECode] = Field(default_factory=list)
+    source_checks: list[PTDataSourceStatus] = Field(default_factory=list)
+    public_contracts_total: int | None = None
+    public_contracts_value: float | None = None
+
+
 class SourceStatus(str, Enum):
     OK = "ok"
     ERROR = "error"
@@ -188,6 +296,18 @@ class EntityReport(BaseModel):
     adc_processes: list[AdCProcess] = Field(default_factory=list)
     has_competition_issues: bool = False
     iberinform_content: str | None = None
+    prr_fundings: list[PRRFunding] = Field(default_factory=list)
+    prr_contracts: list[PRRContract] = Field(default_factory=list)
+    has_prr_funding: bool = False
+    prr_total_contracted: float = 0.0
+    prr_total_paid: float = 0.0
+    pt2030_fundings: list[PT2030Funding] = Field(default_factory=list)
+    has_pt2030_funding: bool = False
+    pt2030_total_fund_approved: float = 0.0
+    pt2030_total_fund_paid: float = 0.0
+    corporate_group: CorporateGroup | None = None
+    municipality_contracts: list[MunicipalityContract] = Field(default_factory=list)
+    ptdata_company: PTDataCompany | None = None
     source_statuses: list[SourceResult] = Field(default_factory=list)
     queried_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -200,4 +320,8 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: list[ChatMessage] = Field(default_factory=list)
+    report: EntityReport
+
+
+class OverviewRequest(BaseModel):
     report: EntityReport

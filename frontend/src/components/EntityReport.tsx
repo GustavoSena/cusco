@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { EntityReport as EntityReportType, SourceResult } from "../types";
 import { InsolvencyBadge } from "./InsolvencyBadge";
 import { DebtorStatus } from "./DebtorStatus";
@@ -5,11 +6,17 @@ import { ContractsList } from "./ContractsList";
 import { CompanyProfile } from "./CompanyProfile";
 import { AdCCard } from "./AdCCard";
 import { IntelligenceSummary } from "./IntelligenceSummary";
+import { CompanyOverview } from "./CompanyOverview";
+import { CorporateGroupCard } from "./CorporateGroupCard";
+import { EUFundingCard } from "./EUFundingCard";
+import { MunicipalitiesCard } from "./MunicipalitiesCard";
 import { StreamSection, SkeletonHalfCard, SkeletonCard } from "./Skeleton";
 
 interface Props {
   report: EntityReportType;
   loading?: boolean;
+  aiOverviewAvailable?: boolean;
+  onSelectNif?: (nif: string) => void;
 }
 
 function entityTypeLabel(type: string): string {
@@ -63,9 +70,44 @@ function SourceStatuses({ statuses }: { statuses: SourceResult[] }) {
   );
 }
 
-export function EntityReport({ report, loading = false }: Props) {
+export function EntityReport({
+  report,
+  loading = false,
+  aiOverviewAvailable = false,
+  onSelectNif,
+}: Props) {
   const hasWarnings =
     report.has_insolvency || report.is_tax_debtor || report.has_competition_issues;
+
+  // When the AI overview is available, collapse the detailed sections by default
+  // so the overview is the focal point. When it isn't, fall back to the legacy
+  // behaviour (details visible).
+  //
+  // `aiOverviewAvailable` comes from /api/config which resolves after mount.
+  // If the user searches before it lands, the initial value is `false`, so we
+  // sync via effect once the flag flips — but only if the user hasn't manually
+  // toggled the panel. That keeps user intent sticky.
+  const [detailsExpanded, setDetailsExpanded] = useState(!aiOverviewAvailable);
+  const [userToggled, setUserToggled] = useState(false);
+
+  useEffect(() => {
+    // When AI overview flips to unavailable (user disables the toggle, or
+    // the backend reports it missing), the "Hide details" toggle button
+    // disappears. If we don't force the details open here, a user who
+    // previously hid them is stuck with `detailsExpanded=false` and
+    // `inert=true` on the whole detailed section, making every data
+    // card silently unreachable by keyboard/assistive tech.
+    if (!aiOverviewAvailable) {
+      setDetailsExpanded(true);
+      setUserToggled(false);
+      return;
+    }
+    // AI is available: initial default is collapsed (overview is the
+    // focal point), unless the user has manually toggled since then.
+    if (!userToggled) {
+      setDetailsExpanded(false);
+    }
+  }, [aiOverviewAvailable, userToggled]);
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
@@ -123,59 +165,170 @@ export function EntityReport({ report, loading = false }: Props) {
         <SourceStatuses statuses={report.source_statuses} />
       </div>
 
-      {/* Intelligence Summary */}
-      <IntelligenceSummary report={report} loading={loading} />
+      {/* When AI overview is ON, the Company Profile is promoted out of
+          the collapsible sections so the focal area of the page reads
+          as: header → identity card (compact) → AI narrative. The
+          profile still renders its own expand/collapse for deep detail,
+          and the CAE list within it truncates by default. */}
+      {aiOverviewAvailable && (
+        <StreamSection
+          source={["entities", "gleif"]}
+          report={report}
+          skeleton={<SkeletonCard lines={5} />}
+        >
+          <CompanyProfile report={report} compact />
+        </StreamSection>
+      )}
 
-      {/* Risk indicators */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <StreamSection
-          source="citius"
-          report={report}
-          skeleton={<SkeletonHalfCard />}
+      {/* AI-generated overview */}
+      {aiOverviewAvailable && (
+        <CompanyOverview report={report} loading={loading} />
+      )}
+
+      {/* Collapse toggle — only shown when the overview is available */}
+      {aiOverviewAvailable && (
+        <button
+          onClick={() => {
+            setDetailsExpanded(!detailsExpanded);
+            setUserToggled(true);
+          }}
+          className="w-full py-2.5 text-sm text-stone-600 hover:text-stone-900 hover:bg-stone-50 rounded-lg border border-stone-200 transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+          aria-expanded={detailsExpanded}
+          aria-controls="entity-report-details"
         >
-          <InsolvencyBadge
-            proceedings={report.insolvency_proceedings}
-            hasInsolvency={report.has_insolvency}
-          />
-        </StreamSection>
-        <StreamSection
-          source="devedores"
-          report={report}
-          skeleton={<SkeletonHalfCard />}
-        >
-          <DebtorStatus
-            debtor={report.debtor}
-            isTaxDebtor={report.is_tax_debtor}
-          />
-        </StreamSection>
+          <svg
+            className={`w-4 h-4 transition-transform ${detailsExpanded ? "rotate-180" : ""}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+          {detailsExpanded ? "Hide detailed sections" : "Show detailed sections"}
+        </button>
+      )}
+
+      {/* Detailed sections — collapsible when the AI overview is available */}
+      {/* `inert` makes the subtree both invisible to assistive tech and
+          unfocusable by keyboard — the correct pattern for collapsed content
+          containing focusable descendants (aria-hidden alone would still
+          allow tab focus, which is a WCAG failure). */}
+      <div
+        id="entity-report-details"
+        className="grid-expand"
+        inert={!detailsExpanded}
+      >
+        <div>
+          <div className="space-y-6">
+            {/* Intelligence Summary */}
+            <IntelligenceSummary report={report} loading={loading} />
+
+            {/* Risk indicators */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <StreamSection
+                source="citius"
+                report={report}
+                skeleton={<SkeletonHalfCard />}
+              >
+                <InsolvencyBadge
+                  proceedings={report.insolvency_proceedings}
+                  hasInsolvency={report.has_insolvency}
+                />
+              </StreamSection>
+              <StreamSection
+                source="devedores"
+                report={report}
+                skeleton={<SkeletonHalfCard />}
+              >
+                <DebtorStatus
+                  debtor={report.debtor}
+                  isTaxDebtor={report.is_tax_debtor}
+                />
+              </StreamSection>
+            </div>
+
+            {/* Company Profile — only rendered in the collapsible when the
+                AI overview is OFF. When AI is ON, the profile is above. */}
+            {!aiOverviewAvailable && (
+              <StreamSection
+                source={["entities", "gleif"]}
+                report={report}
+                skeleton={<SkeletonCard lines={5} />}
+              >
+                <CompanyProfile report={report} />
+              </StreamSection>
+            )}
+
+            {/* Corporate Group — populated via GLEIF enrichment */}
+            {report.corporate_group && (
+              <StreamSection
+                source="gleif"
+                report={report}
+                skeleton={<SkeletonCard lines={4} />}
+              >
+                <CorporateGroupCard
+                  group={report.corporate_group}
+                  onSelectNif={onSelectNif ?? (() => {})}
+                />
+              </StreamSection>
+            )}
+
+            {/* Competition Authority (AdC) */}
+            <AdCCard
+              processes={report.adc_processes ?? []}
+              hasCompetitionIssues={report.has_competition_issues ?? false}
+            />
+
+            {/* EU Funding (PRR + PT2030) */}
+            <StreamSection
+              source={["prr", "pt2030"]}
+              report={report}
+              skeleton={<SkeletonCard lines={5} />}
+            >
+              <EUFundingCard
+                prrFundings={report.prr_fundings ?? []}
+                prrContracts={report.prr_contracts ?? []}
+                prrTotalContracted={report.prr_total_contracted ?? 0}
+                prrTotalPaid={report.prr_total_paid ?? 0}
+                pt2030Fundings={report.pt2030_fundings ?? []}
+                pt2030TotalFundApproved={
+                  report.pt2030_total_fund_approved ?? 0
+                }
+                pt2030TotalFundPaid={report.pt2030_total_fund_paid ?? 0}
+              />
+            </StreamSection>
+
+            {/* Contracts */}
+            <StreamSection
+              source="contracts"
+              report={report}
+              skeleton={<SkeletonCard lines={6} />}
+            >
+              <ContractsList
+                contracts={report.contracts}
+                totalValue={report.contracts_total_value}
+              />
+            </StreamSection>
+
+            {/* Municipalities — derived from contracts as supplier */}
+            <StreamSection
+              source="contracts"
+              report={report}
+              skeleton={<SkeletonCard lines={4} />}
+            >
+              <MunicipalitiesCard
+                municipalities={report.municipality_contracts ?? []}
+              />
+            </StreamSection>
+          </div>
+        </div>
       </div>
-
-      {/* Company Profile — unified identity + stats from LEI, IMPIC, ptdata */}
-      <StreamSection
-        source={["entities", "gleif"]}
-        report={report}
-        skeleton={<SkeletonCard lines={5} />}
-      >
-        <CompanyProfile report={report} />
-      </StreamSection>
-
-      {/* Competition Authority (AdC) */}
-      <AdCCard
-        processes={report.adc_processes ?? []}
-        hasCompetitionIssues={report.has_competition_issues ?? false}
-      />
-
-      {/* Contracts */}
-      <StreamSection
-        source="contracts"
-        report={report}
-        skeleton={<SkeletonCard lines={6} />}
-      >
-        <ContractsList
-          contracts={report.contracts}
-          totalValue={report.contracts_total_value}
-        />
-      </StreamSection>
     </div>
   );
 }

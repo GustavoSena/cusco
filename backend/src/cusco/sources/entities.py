@@ -1,22 +1,26 @@
 """IMPIC entity registry from dados.gov.pt.
 
-Downloads the bulk entidades.json (~47MB) and indexes by NIF and name.
+Downloads the bulk entidades.json (~47MB) on a 24h TTL and persists it in
+SQLite (via :mod:`cusco.storage`) for NIF- and name-based lookup.
+
 Provides:
 - Company name + country enrichment for any NIF
-- Name-to-NIF fuzzy search
+- Name-to-NIF substring search
 - Aggregate contract stats (total contracts, total value as supplier/entity)
+
+Storage shape:
+- `entities` bulk table: (nif, entity_dict_json) — one row per entity
+- `entities_by_name` index table: (name_lower, nif) for `search_by_name`
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
-import os
-import time
-from pathlib import Path
 from typing import Any
 
 from ..models import EntityProfile
+from ..storage import BulkTable, NameIndexTable
 from .base import DataSource
 
 logger = logging.getLogger(__name__)
@@ -26,7 +30,6 @@ DATASET_API_URL = (
     "contratos-publicos-portal-base-impic-entidades/"
 )
 
-CACHE_DIR = Path(os.environ.get("CUSCO_CACHE_DIR", "/tmp/cusco_cache"))
 CACHE_MAX_AGE_SECONDS = 24 * 3600  # 1 day
 
 
@@ -37,40 +40,51 @@ class EntitiesSource(DataSource):
 
     def __init__(self, timeout: float = 120.0):
         super().__init__(timeout=timeout)
-        self._by_nif: dict[str, dict] = {}
-        self._by_name: dict[str, list[dict]] = {}  # lowercase name -> entities
+        # NIF-keyed payload table + a small (name_lower, nif) index for
+        # substring name search. Both are rebuilt together in `_do_load`.
+        self._table = BulkTable("entities")
+        self._name_index = NameIndexTable("entities_by_name")
         self._loaded = False
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     async def _ensure_loaded(self) -> None:
-        if self._loaded:
+        """Idempotent load — serialized via `_load_once` so concurrent
+        first queries don't each re-download + re-parse the dataset."""
+        await self._load_once(self._do_load, lambda: self._loaded)
+
+    async def _do_load(self) -> None:
+        table_fresh = await asyncio.to_thread(
+            self._table.is_fresh, CACHE_MAX_AGE_SECONDS
+        )
+        name_fresh = await asyncio.to_thread(
+            self._name_index.is_fresh, CACHE_MAX_AGE_SECONDS
+        )
+        if table_fresh and name_fresh:
+            row_count = await asyncio.to_thread(self._table.row_count)
+            logger.info(
+                f"IMPIC entities: SQLite fresh — {row_count} entities "
+                "(skipping download)"
+            )
+            self._loaded = True
             return
+
         try:
             data = await self._load_entities()
-            self._index_entities(data)
-        except Exception as e:
-            logger.warning(f"Failed to load IMPIC entities: {e}")
-        self._loaded = True
+            await self._persist_entities(data)
+            self._loaded = True
+        except Exception as e:  # noqa: BLE001
+            # Don't flip `_loaded=True` on failure: otherwise a transient
+            # network blip at startup would silently serve empty results
+            # for the rest of the process lifetime. `_load_once` will see
+            # the flag still False and let the next query re-enter.
+            logger.warning(
+                f"Failed to load IMPIC entities (will retry on next query): {e}"
+            )
 
     async def _load_entities(self) -> list[dict]:
-        cache_file = CACHE_DIR / "entidades.json"
-
-        # Check cache
-        if cache_file.exists():
-            age = time.time() - cache_file.stat().st_mtime
-            if age < CACHE_MAX_AGE_SECONDS:
-                logger.info("Loading IMPIC entities from cache")
-                with open(cache_file) as f:
-                    return json.load(f)
-
         # Resolve download URL from the dataset API
         url = await self._find_json_url()
         if not url:
             logger.warning("Could not find IMPIC entities download URL")
-            # Fall back to stale cache
-            if cache_file.exists():
-                with open(cache_file) as f:
-                    return json.load(f)
             return []
 
         async with self._client() as client:
@@ -92,10 +106,6 @@ class EntitiesSource(DataSource):
                             f"Unexpected IMPIC entities format: {type(data)}"
                         )
                         return []
-
-            # Cache the raw data
-            with open(cache_file, "w") as f:
-                json.dump(data, f)
 
             logger.info(f"Loaded {len(data)} IMPIC entities")
             return data
@@ -119,22 +129,56 @@ class EntitiesSource(DataSource):
             logger.warning(f"Failed to resolve IMPIC entities URL: {e}")
         return None
 
-    def _index_entities(self, entities: list[dict]) -> None:
-        """Build NIF and name indexes for fast lookup."""
+    async def _persist_entities(self, entities: list[dict]) -> None:
+        """Write entities + name index to SQLite.
+
+        We build the two (key, row) lists up-front and then hand both off
+        to `BulkTable.replace_all` / `NameIndexTable.replace_all`. Each
+        table is rewritten atomically inside its own transaction.
+        """
+        # Refuse to overwrite the tables with an empty payload — if the
+        # upstream download returned nothing (404, malformed JSON, etc.)
+        # yesterday's 110K-entity cache is strictly better than wiping
+        # to zero. The caller already logged the upstream failure.
+        if not entities:
+            logger.warning(
+                "IMPIC entities payload is empty — keeping previous "
+                "cache instead of persisting 0 rows"
+            )
+            return
+
+        nif_rows: list[tuple[str, dict]] = []
+        name_rows: list[tuple[str, str]] = []
+
         for entity in entities:
             nif = str(entity.get("nifEntidade", "")).strip()
             name = str(entity.get("desigEntidade", "")).strip()
 
             if nif and nif != "-":
-                self._by_nif[nif] = entity
+                nif_rows.append((nif, entity))
+                if name:
+                    name_rows.append((name.lower(), nif))
 
-            if name:
-                key = name.lower()
-                self._by_name.setdefault(key, []).append(entity)
+        if not nif_rows:
+            # Belt-and-braces: even if `entities` was non-empty, it could
+            # be all garbage rows with no NIF. Don't overwrite with those.
+            logger.warning(
+                "IMPIC entities contained no usable NIF rows — "
+                "keeping previous cache"
+            )
+            return
+
+        try:
+            await asyncio.to_thread(self._table.replace_all, nif_rows)
+            await asyncio.to_thread(self._name_index.replace_all, name_rows)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Failed to persist IMPIC entities to SQLite: {e}")
+            # Re-raise so the caller's `_loaded=True` stays gated on success.
+            raise
 
         logger.info(
-            f"Indexed IMPIC entities: {len(self._by_nif)} by NIF, "
-            f"{len(self._by_name)} unique names"
+            f"Indexed IMPIC entities: {len(nif_rows)} by NIF, "
+            f"{len(name_rows)} name-indexed rows"
         )
 
     def _to_profile(self, raw: dict) -> EntityProfile:
@@ -173,16 +217,16 @@ class EntitiesSource(DataSource):
     async def search_by_nif(self, nif: str) -> dict[str, Any]:
         await self._ensure_loaded()
 
-        raw = self._by_nif.get(nif)
-        if not raw:
+        rows = await asyncio.to_thread(self._table.get_by_nif, nif)
+        if not rows:
             return {"entity_profile": None}
 
-        return {"entity_profile": self._to_profile(raw)}
+        return {"entity_profile": self._to_profile(rows[0])}
 
     async def search_by_name(self, name: str) -> dict[str, Any]:
         """Search entities by name (case-insensitive substring match).
 
-        Returns top 20 matches, exact matches first, then substring matches.
+        Returns top 20 matches; exact hits come before substring hits.
         """
         await self._ensure_loaded()
 
@@ -190,29 +234,23 @@ class EntitiesSource(DataSource):
         if not query or len(query) < 2:
             return {"entity_profiles": [], "total_matches": 0}
 
-        exact: list[EntityProfile] = []
-        partial: list[EntityProfile] = []
+        # Pull up to 100 candidate NIFs from the name index (exact first),
+        # then hydrate each one from the payload table. `search_nifs_by_substring`
+        # already preserves the exact-first ordering so we can just walk it.
+        nifs = await asyncio.to_thread(
+            self._name_index.search_nifs_by_substring, query, 100
+        )
 
-        # Exact match first
-        if query in self._by_name:
-            for raw in self._by_name[query]:
-                exact.append(self._to_profile(raw))
-
-        # Substring match across all names (capped for performance)
-        matches_checked = 0
-        for stored_name, entities in self._by_name.items():
-            if stored_name == query:
-                continue  # Already handled
-            if query in stored_name:
-                for raw in entities:
-                    partial.append(self._to_profile(raw))
-                    if len(partial) >= 100:
-                        break
-            matches_checked += 1
-            if len(partial) >= 100:
+        results: list[EntityProfile] = []
+        for nif in nifs:
+            rows = await asyncio.to_thread(self._table.get_by_nif, nif)
+            for raw in rows:
+                results.append(self._to_profile(raw))
+                if len(results) >= 100:
+                    break
+            if len(results) >= 100:
                 break
 
-        results = exact + partial
         return {
             "entity_profiles": results[:20],
             "total_matches": len(results),
