@@ -91,8 +91,21 @@ export function EntityReport({
   const [userToggled, setUserToggled] = useState(false);
 
   useEffect(() => {
+    // When AI overview flips to unavailable (user disables the toggle, or
+    // the backend reports it missing), the "Hide details" toggle button
+    // disappears. If we don't force the details open here, a user who
+    // previously hid them is stuck with `detailsExpanded=false` and
+    // `inert=true` on the whole detailed section, making every data
+    // card silently unreachable by keyboard/assistive tech.
+    if (!aiOverviewAvailable) {
+      setDetailsExpanded(true);
+      setUserToggled(false);
+      return;
+    }
+    // AI is available: initial default is collapsed (overview is the
+    // focal point), unless the user has manually toggled since then.
     if (!userToggled) {
-      setDetailsExpanded(!aiOverviewAvailable);
+      setDetailsExpanded(false);
     }
   }, [aiOverviewAvailable, userToggled]);
 

@@ -80,18 +80,45 @@ class ContractsSource(DataSource):
         # entity holds yesterday's rows — and `_loaded=True` would mask
         # the skew across `search_by_nif` joins. Track them individually;
         # only flip `_loaded` when both succeed so the next query retries.
+        #
+        # Also: if every `_load_year(...)` in the loop above failed or
+        # silently returned [], supplier_rows / entity_rows are empty.
+        # Calling `replace_all([])` would happily commit, wiping
+        # yesterday's 170K good rows to zero while bumping `_meta.loaded_at`
+        # so `is_fresh` reports True for the next 24h. `prr.py` and
+        # `entities.py` already guard against this; mirror the pattern here.
         supplier_ok = True
         entity_ok = True
-        try:
-            await asyncio.to_thread(self._supplier_table.replace_all, supplier_rows)
-        except Exception as e:  # noqa: BLE001
+        if supplier_rows:
+            try:
+                await asyncio.to_thread(
+                    self._supplier_table.replace_all, supplier_rows
+                )
+            except Exception as e:  # noqa: BLE001
+                supplier_ok = False
+                logger.warning(
+                    f"Failed to persist supplier contracts to SQLite: {e}"
+                )
+        else:
             supplier_ok = False
-            logger.warning(f"Failed to persist supplier contracts to SQLite: {e}")
-        try:
-            await asyncio.to_thread(self._entity_table.replace_all, entity_rows)
-        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Contracts: 0 supplier rows parsed from upstream — "
+                "keeping previous cache instead of overwriting with empty"
+            )
+        if entity_rows:
+            try:
+                await asyncio.to_thread(self._entity_table.replace_all, entity_rows)
+            except Exception as e:  # noqa: BLE001
+                entity_ok = False
+                logger.warning(
+                    f"Failed to persist entity contracts to SQLite: {e}"
+                )
+        else:
             entity_ok = False
-            logger.warning(f"Failed to persist entity contracts to SQLite: {e}")
+            logger.warning(
+                "Contracts: 0 entity rows parsed from upstream — "
+                "keeping previous cache instead of overwriting with empty"
+            )
 
         if supplier_ok and entity_ok:
             self._loaded = True

@@ -1,3 +1,5 @@
+import { useId } from "react";
+
 interface Props {
   checked: boolean;
   onChange: (next: boolean) => void;
@@ -30,6 +32,11 @@ export function ToggleSwitch({
   adornment,
   disabled = false,
 }: Props) {
+  // React's `useId` produces a stable, SSR-safe unique id that never
+  // contains whitespace. Previously we interpolated `label` into the id,
+  // which produces invalid HTML (`"AI overview-desc"` has a space) and
+  // collides if two switches share a label on the same page.
+  const descId = useId();
   return (
     <label
       className={`inline-flex items-center gap-2 text-xs ${
@@ -45,7 +52,7 @@ export function ToggleSwitch({
         role="switch"
         aria-checked={checked}
         aria-label={label}
-        aria-describedby={description ? `${label}-desc` : undefined}
+        aria-describedby={description ? descId : undefined}
         disabled={disabled}
         onClick={() => !disabled && onChange(!checked)}
         className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 ${
@@ -59,7 +66,7 @@ export function ToggleSwitch({
         />
       </button>
       {description && (
-        <span id={`${label}-desc`} className="sr-only">
+        <span id={descId} className="sr-only">
           {description}
         </span>
       )}

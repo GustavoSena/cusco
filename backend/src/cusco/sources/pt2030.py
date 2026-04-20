@@ -136,6 +136,16 @@ class PT2030Source(DataSource):
             resp.raise_for_status()
             rows = self._parse_xlsx(resp.content)
 
+            # Don't overwrite yesterday's good cache with an empty result
+            # (workbook empty, schema change, parse crash that returned []).
+            # Fall back to the on-disk cache so queries keep working.
+            if not rows:
+                logger.warning(
+                    "PT2030 XLSX parsed to 0 rows — keeping previous cache "
+                    "instead of overwriting with empty"
+                )
+                return self._read_cache(cache_file) or []
+
             self._write_cache_atomic(cache_file, rows)
             logger.info(f"Loaded {len(rows)} PT2030 entidades rows")
             return rows
@@ -144,36 +154,41 @@ class PT2030Source(DataSource):
         from openpyxl import load_workbook
 
         wb = load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
-        ws = wb.active
-        if ws is None:
-            return []
-
-        rows_iter = ws.iter_rows(values_only=True)
         try:
-            headers = [str(h).strip() if h is not None else "" for h in next(rows_iter)]
-        except StopIteration:
-            return []
+            ws = wb.active
+            if ws is None:
+                return []
 
-        out: list[dict] = []
-        for row in rows_iter:
-            if row is None:
-                continue
-            record = {}
-            for idx, header in enumerate(headers):
-                if not header:
+            rows_iter = ws.iter_rows(values_only=True)
+            try:
+                headers = [
+                    str(h).strip() if h is not None else "" for h in next(rows_iter)
+                ]
+            except StopIteration:
+                return []
+
+            out: list[dict] = []
+            for row in rows_iter:
+                if row is None:
                     continue
-                value = row[idx] if idx < len(row) else None
-                # openpyxl returns datetime objects for date cells — not JSON
-                # serializable. Convert to ISO strings during parse so the
-                # cached JSON round-trips cleanly.
-                if isinstance(value, (_dt.datetime, _dt.date)):
-                    value = value.isoformat()
-                record[header] = value
-            if any(v not in (None, "") for v in record.values()):
-                out.append(record)
-
-        wb.close()
-        return out
+                record = {}
+                for idx, header in enumerate(headers):
+                    if not header:
+                        continue
+                    value = row[idx] if idx < len(row) else None
+                    # openpyxl returns datetime objects for date cells — not JSON
+                    # serializable. Convert to ISO strings during parse so the
+                    # cached JSON round-trips cleanly.
+                    if isinstance(value, (_dt.datetime, _dt.date)):
+                        value = value.isoformat()
+                    record[header] = value
+                if any(v not in (None, "") for v in record.values()):
+                    out.append(record)
+            return out
+        finally:
+            # Guarantee release of the underlying zip fd even if iteration
+            # raises (broken datetime cell, unexpected type, etc.).
+            wb.close()
 
     async def _find_xlsx_url(self) -> str | None:
         try:
