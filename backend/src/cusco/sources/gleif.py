@@ -13,12 +13,16 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..models import LEIRecord
+from ..models import GroupMember, LEIRecord
 from .base import DataSource
 
 logger = logging.getLogger(__name__)
 
 GLEIF_API_BASE = "https://api.gleif.org/api/v1"
+
+# Max pages of direct-children to fetch (page size 100 → up to 200 children).
+MAX_CHILDREN_PAGES = 2
+CHILDREN_PAGE_SIZE = 100
 
 
 class GleifSource(DataSource):
@@ -113,4 +117,111 @@ class GleifSource(DataSource):
             initial_registration_date=registration.get("initialRegistrationDate") or "",
             last_update_date=registration.get("lastUpdateDate") or "",
             next_renewal_date=registration.get("nextRenewalDate") or "",
+        )
+
+    # -- Corporate group relationships ------------------------------------
+    async def get_corporate_group(self, lei: str) -> dict[str, Any]:
+        """Fetch direct children and direct parent for an LEI.
+
+        Uses GLEIF's `/lei-records/{lei}/direct-children` (paginated) and
+        `/lei-records/{lei}/direct-parent` (404 → no parent). Children are
+        capped at MAX_CHILDREN_PAGES * CHILDREN_PAGE_SIZE entries; `has_more`
+        is set when truncated.
+
+        Returns a dict shaped like:
+            {
+                "direct_parent": GroupMember | None,
+                "direct_children": list[GroupMember],
+                "total_children": int,
+                "has_more_children": bool,
+            }
+        """
+        if not lei:
+            return {
+                "direct_parent": None,
+                "direct_children": [],
+                "total_children": 0,
+                "has_more_children": False,
+            }
+
+        children: list[GroupMember] = []
+        total_children = 0
+        has_more = False
+
+        async with self._client() as client:
+            # Direct parent (may 404)
+            parent: GroupMember | None = None
+            try:
+                resp = await client.get(
+                    f"{GLEIF_API_BASE}/lei-records/{lei}/direct-parent"
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw = data.get("data")
+                    if raw:
+                        parent = self._parse_group_member(raw, "parent")
+                elif resp.status_code != 404:
+                    logger.warning(
+                        f"GLEIF direct-parent returned {resp.status_code} for {lei}"
+                    )
+            except Exception as e:  # noqa: BLE001 - relationship enrichment is best-effort
+                logger.warning(f"GLEIF direct-parent fetch failed for {lei}: {e}")
+
+            # Direct children (paginated)
+            for page in range(1, MAX_CHILDREN_PAGES + 1):
+                try:
+                    resp = await client.get(
+                        f"{GLEIF_API_BASE}/lei-records/{lei}/direct-children",
+                        params={
+                            "page[size]": str(CHILDREN_PAGE_SIZE),
+                            "page[number]": str(page),
+                        },
+                    )
+                    if resp.status_code == 404:
+                        break
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception as e:  # noqa: BLE001 - relationship enrichment is best-effort
+                    logger.warning(
+                        f"GLEIF direct-children fetch failed for {lei} p{page}: {e}"
+                    )
+                    break
+
+                page_items = data.get("data", []) or []
+                for raw in page_items:
+                    children.append(self._parse_group_member(raw, "child"))
+
+                pagination = (data.get("meta") or {}).get("pagination") or {}
+                total_children = int(pagination.get("total") or len(children))
+                total_pages = int(pagination.get("totalPages") or 0)
+
+                if total_pages and page >= total_pages:
+                    break
+                if not page_items:
+                    break
+
+            if total_children > len(children):
+                has_more = True
+
+        return {
+            "direct_parent": parent,
+            "direct_children": children,
+            "total_children": total_children or len(children),
+            "has_more_children": has_more,
+        }
+
+    def _parse_group_member(self, raw: dict, relationship: str) -> GroupMember:
+        """Extract minimal identity info for a related LEI record."""
+        attrs = raw.get("attributes", {}) or {}
+        entity = attrs.get("entity", {}) or {}
+        legal_name_obj = entity.get("legalName") or {}
+        legal_addr = entity.get("legalAddress") or {}
+
+        return GroupMember(
+            nif=str(entity.get("registeredAs") or "").strip(),
+            name=str(legal_name_obj.get("name") or "").strip(),
+            lei=str(attrs.get("lei") or "").strip(),
+            country=str(legal_addr.get("country") or "").strip(),
+            entity_status=str(entity.get("status") or "").strip(),
+            relationship=relationship,
         )

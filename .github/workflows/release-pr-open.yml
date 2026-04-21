@@ -1,0 +1,147 @@
+# Opens a fresh, empty release PR (develop → main) after every release.
+#
+# Triggered by two events:
+#   1. A PR from `develop` to `main` closes — regardless of merged/not,
+#      we need to make sure there's always exactly one open release PR
+#      (or zero, briefly, before this job runs).
+#   2. Manual dispatch via the Actions tab, for the first-ever release
+#      or to recover from accidental PR deletion.
+#
+# The PR body is the same skeleton the sync workflow expects: it has the
+# two marker pairs (`RELEASE_PR:PRS_*` and `RELEASE_PR:CLOSES_*`) empty
+# and ready to be filled as new PRs merge to develop.
+#
+# ⚠️  GITHUB_TOKEN caveat — action-created PRs don't trigger workflows.
+# -------------------------------------------------------------------
+# GitHub explicitly blocks recursion: a PR opened using the default
+# `GITHUB_TOKEN` will NOT fire `pull_request` or `push` events on
+# downstream workflows (CodeRabbit, CI, etc.). If you want CodeRabbit
+# or CI to run on the freshly-opened release PR automatically, swap
+# `${{ secrets.GITHUB_TOKEN }}` below for a PAT stored as a repo secret
+# (e.g. `secrets.RELEASE_PAT`) that is scoped to `repo` / `workflow`.
+# Without a PAT, the first way to trigger CI on this PR is to push
+# another commit to `develop` or close-and-reopen it manually.
+name: Release PR open
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  open:
+    # Only react to PRs whose head is `develop` — don't open a new
+    # release PR in response to, say, a hotfix merged directly to main.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.pull_request.head.ref == 'develop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open fresh release PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+
+            // If a release PR is already open, we're done. This makes the
+            // workflow safely re-runnable and idempotent.
+            const { data: openPrs } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              base: 'main',
+              head: `${owner}:develop`,
+              per_page: 5,
+            });
+            if (openPrs.length > 0) {
+              core.info(`Release PR #${openPrs[0].number} is already open — nothing to do.`);
+              return;
+            }
+
+            // Make sure develop is actually ahead of main — otherwise
+            // `pulls.create` fails with "No commits between main and develop".
+            const { data: compare } = await github.rest.repos.compareCommits({
+              owner,
+              repo,
+              base: 'main',
+              head: 'develop',
+            });
+            if (compare.ahead_by === 0) {
+              core.info('develop has no commits ahead of main — skipping. '
+                + 'The next merge to develop will trigger the next release.');
+              return;
+            }
+
+            const body = [
+              '## 🚀 Release candidate',
+              '',
+              'This is the long-running **release PR** that accumulates every '
+              + 'change merged to `develop`. It stays open until an explicit '
+              + 'release and is updated automatically whenever a PR is merged '
+              + 'into `develop` — see the automation in '
+              + '`.github/workflows/release-pr-sync.yml`.',
+              '',
+              '**How to release**: merge this PR into `main`. The automation '
+              + 'will then open a fresh empty release PR for the next cycle.',
+              '',
+              '---',
+              '',
+              '## Closes',
+              '',
+              '<!-- RELEASE_PR:CLOSES_START -->',
+              '_No issues closed yet._',
+              '<!-- RELEASE_PR:CLOSES_END -->',
+              '',
+              '## Included PRs',
+              '',
+              '<!-- RELEASE_PR:PRS_START -->',
+              '_No PRs merged to develop in this cycle yet._',
+              '<!-- RELEASE_PR:PRS_END -->',
+              '',
+              '## Highlights',
+              '',
+              '_Fill in as PRs land — the automation only touches the sections '
+              + 'between the `RELEASE_PR:*` markers._',
+              '',
+              '## Verification before release',
+              '',
+              '- [ ] Backend: `ruff check backend/src` clean',
+              '- [ ] Frontend: `npm run build` + `tsc --noEmit` clean',
+              '- [ ] Smoke: search EDP (500697256) returns all sources `ok`',
+              '- [ ] CodeRabbit re-review on the final diff is green',
+              '',
+              '---',
+              '',
+              '<sub>Automated sections (between `RELEASE_PR:*` markers) are '
+              + 'rewritten by `release-pr-sync.yml` every time a PR merges to '
+              + '`develop`. Edit narrative sections freely — they\'re preserved '
+              + 'across updates.</sub>',
+            ].join('\n');
+
+            const { data: created } = await github.rest.pulls.create({
+              owner,
+              repo,
+              base: 'main',
+              head: 'develop',
+              title: '🚀 Release: develop → main',
+              body,
+            });
+            core.info(`Opened release PR #${created.number}.`);
+
+            // Best-effort label — no-op if the label doesn't exist in the repo.
+            try {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: created.number,
+                labels: ['release'],
+              });
+            } catch (e) {
+              core.info(`Skipped adding 'release' label: ${e.message}`);
+            }

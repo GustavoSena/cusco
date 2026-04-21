@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Contract } from "../types";
 import { formatEUR } from "../format";
+import { Pagination } from "./Pagination";
 
 interface Props {
   contracts: Contract[];
@@ -9,14 +10,13 @@ interface Props {
 
 type SortField = "contract_price" | "signing_date" | "year";
 
-const INITIAL_LIMIT = 10;
-const LOAD_MORE_STEP = 20;
+const PAGE_SIZE = 5;
 
 export function ContractsList({ contracts, totalValue }: Props) {
   const [sortBy, setSortBy] = useState<SortField>("signing_date");
   const [sortDesc, setSortDesc] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [visibleCount, setVisibleCount] = useState(INITIAL_LIMIT);
+  const [page, setPage] = useState(0);
 
   const sorted = [...contracts].sort((a, b) => {
     const dir = sortDesc ? -1 : 1;
@@ -35,10 +35,27 @@ export function ContractsList({ contracts, totalValue }: Props) {
       setSortBy(field);
       setSortDesc(true);
     }
+    setPage(0);
   };
 
-  const visible = sorted.slice(0, visibleCount);
-  const hasMore = visibleCount < contracts.length;
+  // Reset to first page when sort order or the dataset itself changes.
+  // Depending on `contracts` identity (not just `.length`) catches the
+  // case where the user switches to a different company that happens
+  // to have the same number of contracts — same length, completely
+  // different rows.
+  useEffect(() => {
+    setPage(0);
+  }, [sortBy, sortDesc, contracts]);
+
+  // Clamp against the current dataset on render too, so a brief window
+  // where `page` hasn't been reset yet doesn't slice an out-of-range
+  // page (would render blank).
+  const totalPages = Math.max(1, Math.ceil(contracts.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const visible = sorted.slice(
+    currentPage * PAGE_SIZE,
+    (currentPage + 1) * PAGE_SIZE,
+  );
 
   return (
     <div className="bg-white rounded-lg border border-stone-200 p-4 sm:p-6">
@@ -109,22 +126,13 @@ export function ContractsList({ contracts, totalValue }: Props) {
               ))}
             </tbody>
           </table>
-          {hasMore && (
-            <button
-              onClick={() => setVisibleCount((prev) => prev + LOAD_MORE_STEP)}
-              className="mt-3 w-full py-2 text-sm text-brand-600 hover:text-brand-800 hover:bg-brand-50 rounded transition-colors"
-            >
-              Show more ({visibleCount} of {contracts.length})
-            </button>
-          )}
-          {!hasMore && contracts.length > INITIAL_LIMIT && (
-            <button
-              onClick={() => setVisibleCount(INITIAL_LIMIT)}
-              className="mt-3 w-full py-2 text-sm text-stone-500 hover:text-stone-700 hover:bg-stone-50 rounded transition-colors"
-            >
-              Show less
-            </button>
-          )}
+          <Pagination
+            page={currentPage}
+            pageSize={PAGE_SIZE}
+            totalItems={contracts.length}
+            onPageChange={setPage}
+            label="Public contracts pagination"
+          />
         </div>
       )}
     </div>

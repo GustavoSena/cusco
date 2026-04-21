@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..models import SegSocialProcedure, SegSocialOrganism
+from ..models import SegSocialProcedure
 from .base import DataSource
 
 logger = logging.getLogger(__name__)
@@ -36,8 +36,12 @@ class SegSocialSource(DataSource):
     async def _fetch_procedures(self, proc_type: str = "PROCEDURE") -> list[dict]:
         """Fetch all procedures of a given type."""
         async with self._client() as client:
-            # First load the HTML page to get session cookie (fvcc)
-            page_resp = await client.get(
+            # First load the HTML page purely to pick up the session
+            # cookie (fvcc) that the JSON endpoint requires. We throw
+            # the response away — don't assign to a named variable
+            # (ruff F841) and don't `raise_for_status` since a 403/500
+            # still sets the cookie we need.
+            await client.get(
                 PAGE_URL,
                 headers={
                     "Accept": "text/html",
@@ -48,7 +52,6 @@ class SegSocialSource(DataSource):
                     ),
                 },
             )
-            # Don't raise — we just need the cookie
 
             # Now fetch the JSON API
             resp = await client.get(
@@ -67,50 +70,21 @@ class SegSocialSource(DataSource):
             return []
 
     async def search_by_nif(self, nif: str) -> dict[str, Any]:
-        """Search procedures by organism NIF or name match.
+        """Return empty. There is no NIF-level filter on the Seg Social API,
+        and the correct semantic match is PEOPLE-based — cross-referencing
+        named officers/directors from the company's report (Iberinform,
+        corporate-group members) against the candidates / jury members
+        listed in each procedure's PDF attachments.
 
-        The API doesn't support NIF filtering directly, so we fetch all
-        procedures and filter locally. The dataset is small (~200 records).
-        """
-        all_procs = await self._fetch_procedures()
-
-        # Also fetch mobility procedures
-        try:
-            mobility_procs = await self._fetch_procedures("MOBILITY")
-            all_procs.extend(mobility_procs)
-        except Exception:
-            pass  # Mobility endpoint might not exist
-
-        # Filter by NIF in organism data or procedure text
-        matching = []
-        for raw in all_procs:
-            organism = raw.get("organism", {})
-            # Check if the organism NIF/name relates to our query
-            org_name = str(organism.get("name", "")).lower()
-            proc_title = str(raw.get("title", "")).lower()
-
-            # Since the API doesn't expose organism NIFs directly,
-            # we store all procedures indexed by organism for future lookups
-            matching.append(raw)
-
-        procedures = [self._to_procedure(p) for p in matching]
-
-        # Group by organism for entity mapping
-        organisms: dict[str, SegSocialOrganism] = {}
-        for proc in procedures:
-            if proc.organism_name and proc.organism_id:
-                if proc.organism_id not in organisms:
-                    organisms[proc.organism_id] = SegSocialOrganism(
-                        id=proc.organism_id,
-                        name=proc.organism_name,
-                        acronym=proc.organism_acronym,
-                        procedure_count=0,
-                    )
-                organisms[proc.organism_id].procedure_count += 1
-
+        The PDF-extraction + NER pipeline needed for that match is tracked
+        as a follow-up issue. Until it lands, this source returns nothing
+        so the UI doesn't show unrelated procedures as if they were
+        connected to the searched company. `_fetch_procedures` is kept
+        for the future implementation and for the `search_by_name`
+        admin path."""
         return {
-            "seg_social_procedures": procedures,
-            "seg_social_organisms": list(organisms.values()),
+            "seg_social_procedures": [],
+            "seg_social_organisms": [],
         }
 
     async def search_by_name(self, name: str) -> dict[str, Any]:

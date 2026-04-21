@@ -4,9 +4,17 @@ import type { ChatMessage, EntityReport } from "../types";
 
 interface Props {
   report: EntityReport;
+  /**
+   * When true, the report is still streaming — render the chat shell
+   * but keep the input disabled and show a spinner. Mounting the panel
+   * from the first partial report (instead of after loading finishes)
+   * makes it clear to the user that chat will be ready shortly,
+   * instead of the panel silently appearing later.
+   */
+  loading?: boolean;
 }
 
-export function ChatPanel({ report }: Props) {
+export function ChatPanel({ report, loading = false }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -18,10 +26,21 @@ export function ChatPanel({ report }: Props) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Chat is disabled while the report is still loading (we don't have a
+  // full snapshot to send as context yet) or while a previous message
+  // is already streaming. `disabledReason` surfaces why, for the input
+  // placeholder and the `title` tooltip on the Send button.
+  const disabled = loading || isStreaming;
+  const disabledReason = loading
+    ? "Chat is available once the report finishes loading"
+    : isStreaming
+      ? "Waiting for the current answer to finish"
+      : "";
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
-    if (!text || isStreaming) return;
+    if (!text || disabled) return;
 
     setError(null);
     setInput("");
@@ -64,8 +83,20 @@ export function ChatPanel({ report }: Props) {
           aria-controls="chat-panel-content"
           className="w-full flex items-center justify-between p-4 text-left hover:bg-stone-50 transition-colors"
         >
-          <span className="font-semibold text-stone-700">
+          <span className="font-semibold text-stone-700 flex items-center gap-2">
             Ask about this company
+            {loading && (
+              // Inline spinner next to the header so the reason for the
+              // disabled input is visible even when the panel is collapsed.
+              <span
+                className="inline-flex items-center gap-1 text-xs font-normal text-stone-400"
+                role="status"
+                aria-live="polite"
+              >
+                <span className="inline-block w-3 h-3 border-2 border-stone-300 border-t-brand-500 rounded-full animate-spin" />
+                <span>preparing…</span>
+              </span>
+            )}
           </span>
           <svg
             className={`w-5 h-5 text-stone-400 transition-transform duration-300 ${isExpanded ? "rotate-180" : ""}`}
@@ -91,9 +122,29 @@ export function ChatPanel({ report }: Props) {
           <div className="border-t">
             <div className="h-64 sm:h-80 overflow-y-auto p-3 sm:p-4 space-y-3">
               {messages.length === 0 && (
-                <p className="text-sm text-stone-400 text-center mt-8">
-                  Ask a question about {report.company?.name || `NIF ${report.nif}`}
-                </p>
+                <div className="text-center mt-8">
+                  {loading ? (
+                    // Mounted-but-not-ready state: the user sees the chat
+                    // shell as soon as any partial report is on screen,
+                    // with clear feedback that it will become interactive
+                    // once the report finishes streaming.
+                    <div
+                      className="flex flex-col items-center gap-3"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <span className="inline-block w-6 h-6 border-2 border-stone-200 border-t-brand-500 rounded-full animate-spin" />
+                      <p className="text-sm text-stone-400">
+                        Chat will be available once the report finishes loading.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-stone-400">
+                      Ask a question about{" "}
+                      {report.company?.name || `NIF ${report.nif}`}
+                    </p>
+                  )}
+                </div>
               )}
               {messages.map((msg, i) => (
                 <div
@@ -128,22 +179,48 @@ export function ChatPanel({ report }: Props) {
             <form
               onSubmit={handleSubmit}
               className="border-t p-3 flex gap-2"
+              aria-busy={loading}
             >
               <input
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask a question..."
+                placeholder={
+                  loading
+                    ? "Waiting for report to finish loading…"
+                    : "Ask a question..."
+                }
                 aria-label="Ask a question about this company"
-                disabled={isStreaming}
-                className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:bg-stone-100"
+                title={disabledReason || undefined}
+                disabled={disabled}
+                className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:bg-stone-100 disabled:cursor-not-allowed"
               />
               <button
                 type="submit"
-                disabled={isStreaming || !input.trim()}
+                disabled={disabled || !input.trim()}
+                // Explicit aria-label so screen readers still hear a
+                // purposeful button name when the visible content is
+                // just a spinner. Without this, the loading/streaming
+                // states present as an unnamed button.
+                aria-label={
+                  loading
+                    ? "Chat is waiting for the report to finish loading"
+                    : isStreaming
+                      ? "Waiting for the current answer to finish"
+                      : "Send message"
+                }
+                title={disabledReason || undefined}
                 className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 active:scale-[0.97] disabled:bg-stone-300 disabled:cursor-not-allowed transition-all duration-150"
               >
-                {isStreaming ? "..." : "Send"}
+                {loading ? (
+                  <span className="inline-flex items-center gap-1" aria-hidden="true">
+                    <span className="inline-block w-3 h-3 border-2 border-white/60 border-t-white rounded-full animate-spin" />
+                  </span>
+                ) : isStreaming ? (
+                  "..."
+                ) : (
+                  "Send"
+                )}
               </button>
             </form>
           </div>

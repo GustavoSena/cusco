@@ -74,6 +74,47 @@ function buildFindings(report: EntityReport): Finding[] {
     });
   }
 
+  if (isSourceDone(report, "prr") && report.has_prr_funding) {
+    findings.push({
+      type: "info",
+      label: `PRR funding: ${formatEUR(report.prr_total_paid)} paid of ${formatEUR(report.prr_total_contracted)} contracted`,
+    });
+  }
+
+  if (isSourceDone(report, "pt2030") && report.has_pt2030_funding) {
+    findings.push({
+      type: "info",
+      label: `PT2030 funding: ${formatEUR(report.pt2030_total_fund_paid)} paid of ${formatEUR(report.pt2030_total_fund_approved)} approved`,
+    });
+  }
+
+  if (report.corporate_group) {
+    const cg = report.corporate_group;
+    const childCount = cg.children?.length ?? 0;
+    if (childCount > 0) {
+      const count = cg.total_children || childCount;
+      findings.push({
+        type: "info",
+        label: `Corporate group: ${count} subsidiar${count !== 1 ? "ies" : "y"}`,
+      });
+    } else if (cg.parent) {
+      findings.push({
+        type: "info",
+        label: `Subsidiary of ${cg.parent.name || "a parent company"}`,
+      });
+    }
+  }
+
+  // Municipality contracts — only count as a finding if the company has
+  // non-trivial exposure (contracts with multiple municipalities).
+  const muniCount = report.municipality_contracts?.length ?? 0;
+  if (muniCount >= 3 && isSourceDone(report, "contracts")) {
+    findings.push({
+      type: "info",
+      label: `Contracts with ${muniCount} municipalit${muniCount !== 1 ? "ies" : "y"}`,
+    });
+  }
+
   return findings;
 }
 

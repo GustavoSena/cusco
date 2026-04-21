@@ -10,11 +10,15 @@ The database is at https://extranet.concorrencia.pt/PesquisAdC/SearchNew.aspx
 and uses OutSystems which requires a headless browser to render results.
 
 Data is scraped and cached locally, then indexed by entity name for search.
+
+Note: intentionally NOT migrated to SQLite (unlike `contracts`/`entities`/
+`prr`). The AdC dataset is ~400 processes — negligible memory, and the
+scraping pipeline's once-a-week refresh makes the JSON file cache
+perfectly adequate.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -58,9 +62,11 @@ class AdCSource(DataSource):
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     async def _ensure_loaded(self) -> None:
-        if self._loaded:
-            return
+        """Idempotent load — serialized via `_load_once` so concurrent
+        first queries don't each re-download + re-parse the dataset."""
+        await self._load_once(self._do_load, lambda: self._loaded)
 
+    async def _do_load(self) -> None:
         cache_file = CACHE_DIR / "adc_processes.json"
 
         # Check cache
