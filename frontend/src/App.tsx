@@ -20,11 +20,14 @@ export default function App() {
   const [aiOverviewAvailable, setAiOverviewAvailable] = useState(false);
   const [chatAvailable, setChatAvailable] = useState(false);
 
-  // User preference — defaults to ON when the backend supports it. Stored
-  // in localStorage so the choice persists across sessions and tabs.
+  // User preference — OFF by default. AI overview is opt-in: users who
+  // want the LLM-generated narrative turn it on, everyone else sees the
+  // full data cards without the overview forcing the details section
+  // into collapsed-by-default mode. Stored in localStorage so the
+  // choice persists across sessions and tabs.
   const [aiOverviewEnabled, setAiOverviewEnabled] = usePreference(
     "aiOverview",
-    true,
+    false,
   );
   // Effective flag: only enable AI overview when BOTH the backend reports
   // it available (OPENAI_API_KEY configured) AND the user hasn't turned

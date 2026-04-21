@@ -381,6 +381,11 @@ async def search_entity_stream(
             "gleif": gleif_source.search_by_nif(nif),
             "seg_social": seg_social_source.search_by_nif(nif),
             "iberinform": iberinform_source.search_by_nif(nif),
+            # Must mirror the non-stream task list — omitting AdC here
+            # left its status stuck on `pending` for every streamed
+            # search, because nothing ever completed the task that
+            # would flip the status.
+            "adc": adc_source.search_by_nif(nif),
             "prr": prr_source.search_by_nif(nif),
             "pt2030": pt2030_source.search_by_nif(nif),
         }
